@@ -447,6 +447,16 @@ scripts protocols research/
   - Automated tests: 24 new tests (`test_discovery_store.py`, `test_protocol_hunter.py`, `test_gui_headless.py`, `test_cli.py`) bringing the test suite to 181 tests (180 passed, 0 failures, 1 skipped).
 - **Status:** COMPLETED.
 
+#### Phase 8.1 — Fix PyInstaller Runtime Metadata Error (`py_ecc`) (COMPLETED)
+- **Objective:** Fix the frozen-application startup failure caused by `PackageNotFoundError: No package metadata was found for py_ecc`.
+- **Delivered:**
+  - `packaging/defi_research.spec`: Bundled distribution metadata using `copy_metadata` for `py-ecc`, `web3`, and all related Ethereum libraries.
+  - `src/defi_research/__init__.py`: Implemented PEP 562 lazy exports to decouple package loading from eager Web3 imports.
+  - `src/defi_research/gui/app.py`: Configured persistent crash logger hook writing to `%APPDATA%\DeFiResearch\logs\crash.log`.
+  - `tests/test_packaging_metadata.py`: Regression tests for metadata collection, lazy loading, and direct frozen executable invocation.
+  - Verification: Clean rebuild succeeded; verified both `--headless` and normal GUI window launch (PID 20160, 17 active threads). 185 tests passing.
+- **Status:** COMPLETED.
+
 ---
 
 #### Phase 9 — On-Chain Permission Scanner Integration into Pipeline

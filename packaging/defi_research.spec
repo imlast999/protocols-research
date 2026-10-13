@@ -8,6 +8,7 @@ Persistent user data is stored safely in %APPDATA%/DeFiResearch.
 
 from pathlib import Path
 import sys
+from PyInstaller.utils.hooks import copy_metadata
 
 block_cipher = None
 
@@ -19,6 +20,29 @@ added_files = [
     (str(root_dir / "README.md"), "."),
 ]
 
+# Explicitly collect distribution metadata (.dist-info) for packages that use importlib.metadata.version()
+metadata_packages = [
+    "py-ecc",
+    "web3",
+    "eth-account",
+    "eth-keyfile",
+    "eth-keys",
+    "eth-utils",
+    "eth-abi",
+    "eth-typing",
+    "eth-hash",
+    "eth-rlp",
+    "hexbytes",
+    "rlp",
+    "requests",
+]
+
+for pkg in metadata_packages:
+    try:
+        added_files.extend(copy_metadata(pkg))
+    except Exception as exc:
+        print(f"[!] Warning: could not collect metadata for {pkg}: {exc}", file=sys.stderr)
+
 hidden_imports = [
     "PySide6",
     "PySide6.QtCore",
@@ -26,6 +50,17 @@ hidden_imports = [
     "PySide6.QtWidgets",
     "requests",
     "web3",
+    "py_ecc",
+    "eth_account",
+    "eth_keyfile",
+    "eth_keys",
+    "eth_utils",
+    "eth_abi",
+    "eth_typing",
+    "eth_hash",
+    "eth_rlp",
+    "hexbytes",
+    "rlp",
     "dotenv",
     "defi_research",
     "defi_research.config",

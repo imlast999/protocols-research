@@ -18,8 +18,31 @@ from defi_research.gui.main_window import MainWindow
 logger = logging.getLogger("DeFiResearchApp")
 
 
+def setup_exception_logging():
+    """Configures global excepthook to persist unhandled exceptions to disk."""
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        log_dir = get_default_data_dir() / "logs"
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_file = log_dir / "crash.log"
+            with open(log_file, "a", encoding="utf-8") as f:
+                import datetime
+                import traceback
+                f.write(f"\n--- Crash Report [{datetime.datetime.now().isoformat()}] ---\n")
+                traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
+        except Exception:
+            pass
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
+    sys.excepthook = handle_exception
+
+
 def create_application() -> QApplication:
     """Initializes and configures the Qt application instance."""
+    setup_exception_logging()
     app = QApplication.instance()
     if app is None:
         # High DPI scaling attributes are handled natively in Qt 6
