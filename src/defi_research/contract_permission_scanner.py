@@ -18,7 +18,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 from web3 import Web3
 
-from config import ACCESS_MODIFIERS, CHAINS, SENSITIVE_KEYWORDS, ChainConfig
+try:
+    from defi_research.config import ACCESS_MODIFIERS, CHAINS, SENSITIVE_KEYWORDS, ChainConfig
+except ImportError:
+    from config import ACCESS_MODIFIERS, CHAINS, SENSITIVE_KEYWORDS, ChainConfig
 
 
 class ContractScanner:

@@ -1135,6 +1135,14 @@ class DefiLlamaClient:
             logger.warning(f"Could not fetch protocol details for '{slug}': {e}")
         return None
 
+    def get_protocols(self, **kwargs) -> List[Dict[str, Any]]:
+        """Convenience alias for fetch_all_protocols."""
+        return self.fetch_all_protocols(**kwargs)
+
+    def get_protocol(self, slug: str, **kwargs) -> Optional[Dict[str, Any]]:
+        """Convenience alias for fetch_protocol."""
+        return self.fetch_protocol(slug, **kwargs)
+
 
 def main():
     import argparse

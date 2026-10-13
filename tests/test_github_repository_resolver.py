@@ -3,17 +3,36 @@ Comprehensive unit tests for github_repository_resolver.py.
 All tests run offline with zero external network dependencies.
 """
 
+import sys
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from github_repository_resolver import (
-    CandidateType,
-    ResolutionStatus,
-    extract_candidates,
-    normalize_protocol_record,
-    parse_github_url,
-    resolve_github_repository,
-)
+_src_dir = str(Path(__file__).resolve().parent.parent / "src")
+_pkg_dir = str(Path(__file__).resolve().parent.parent / "src" / "defi_research")
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
+if _pkg_dir not in sys.path:
+    sys.path.insert(0, _pkg_dir)
+
+try:
+    from defi_research.github_repository_resolver import (
+        CandidateType,
+        ResolutionStatus,
+        extract_candidates,
+        normalize_protocol_record,
+        parse_github_url,
+        resolve_github_repository,
+    )
+except ImportError:
+    from github_repository_resolver import (
+        CandidateType,
+        ResolutionStatus,
+        extract_candidates,
+        normalize_protocol_record,
+        parse_github_url,
+        resolve_github_repository,
+    )
 
 
 class TestGitHubRepositoryResolver(unittest.TestCase):

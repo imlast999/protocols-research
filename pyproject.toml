@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "defi-research"
+version = "0.4.0"
+description = "DeFi Protocol Discovery, GitHub Resolution, Slither Static Analysis & Security Intelligence Suite"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "web3>=6.0.0",
+    "requests>=2.28.0",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

@@ -13,7 +13,10 @@ from typing import Any, Dict, List, Optional
 import requests
 from web3 import Web3
 
-from github_repository_resolver import normalize_protocol_record
+try:
+    from defi_research.github_repository_resolver import normalize_protocol_record
+except ImportError:
+    from github_repository_resolver import normalize_protocol_record
 
 # Configuración básica de logging
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")

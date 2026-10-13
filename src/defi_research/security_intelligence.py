@@ -18,11 +18,14 @@ from urllib.parse import urlparse
 import requests
 
 try:
-    from config import CERTIK_API_KEY, CERTIK_BASE_URL, CERTIK_TIMEOUT_SECONDS
+    from defi_research.config import CERTIK_API_KEY, CERTIK_BASE_URL, CERTIK_TIMEOUT_SECONDS
 except ImportError:
-    CERTIK_API_KEY = os.getenv("CERTIK_API_KEY", "")
-    CERTIK_BASE_URL = os.getenv("CERTIK_BASE_URL", "https://partner.certik-skynet.com")
-    CERTIK_TIMEOUT_SECONDS = int(os.getenv("CERTIK_TIMEOUT_SECONDS", "10"))
+    try:
+        from config import CERTIK_API_KEY, CERTIK_BASE_URL, CERTIK_TIMEOUT_SECONDS
+    except ImportError:
+        CERTIK_API_KEY = os.getenv("CERTIK_API_KEY", "")
+        CERTIK_BASE_URL = os.getenv("CERTIK_BASE_URL", "https://partner.certik-skynet.com")
+        CERTIK_TIMEOUT_SECONDS = int(os.getenv("CERTIK_TIMEOUT_SECONDS", "10"))
 
 logger = logging.getLogger("SecurityIntelligence")
 
@@ -62,12 +65,15 @@ def sanitize_secret_text(text: Optional[str]) -> Optional[str]:
     """Redacts API keys and private secrets from error strings, logs, and exception dumps."""
     if not text:
         return text
-    # Redact common API key patterns (bearer tokens, x-certik-api-key, etc.)
+    # Redact common API key patterns (bearer tokens, x-certik-api-key, key, secret_key, etc.)
     sanitized = re.sub(
-        r'(?i)(api[_-]?key|secret|token|password|bearer|x-certik-api-key)[\s:=]+([a-zA-Z0-9_\-\.]{12,})',
+        r'(?i)(api[_-]?key|secret[_-]?key|secret|token|password|bearer|x-certik-api-key|key)[\s:=]+([a-zA-Z0-9_\-\.]{12,})',
         r'\1=[REDACTED_SECRET]',
         text,
     )
+    # Redact any obvious tokens or keys prefixed by certik_ / sk_ / secret_ (except certik_project_id)
+    sanitized = re.sub(r'(?i)\b(certik_(?!project_id)[a-zA-Z0-9_]{10,})\b', '[REDACTED_SECRET]', sanitized)
+    sanitized = re.sub(r'(?i)\b(sk_[a-zA-Z0-9_]{10,})\b', '[REDACTED_SECRET]', sanitized)
     # Redact hex private keys
     sanitized = re.sub(r'\b0x[a-fA-F0-9]{64}\b', '[REDACTED_HEX_KEY]', sanitized)
     sanitized = re.sub(r'(?<![a-zA-Z0-9])[a-fA-F0-9]{64}(?![a-zA-Z0-9])', '[REDACTED_HEX_KEY]', sanitized)

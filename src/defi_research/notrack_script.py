@@ -12,10 +12,16 @@ import time
 from typing import Any, Dict, List, Optional
 import requests
 
-from config import CHAINS
-from contract_permission_scanner import ContractScanner
-from market_intelligence import clean_contract_address, CHAIN_ALIAS_MAP
-from github_repository_resolver import normalize_protocol_record
+try:
+    from defi_research.config import CHAINS
+    from defi_research.contract_permission_scanner import ContractScanner
+    from defi_research.market_intelligence import clean_contract_address, CHAIN_ALIAS_MAP
+    from defi_research.github_repository_resolver import normalize_protocol_record
+except ImportError:
+    from config import CHAINS
+    from contract_permission_scanner import ContractScanner
+    from market_intelligence import clean_contract_address, CHAIN_ALIAS_MAP
+    from github_repository_resolver import normalize_protocol_record
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 if hasattr(sys.stdout, "reconfigure"):

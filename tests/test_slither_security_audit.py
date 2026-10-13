@@ -9,22 +9,42 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from github_repository_resolver import (
-    ResolutionStatus,
-    SourceVerificationRecord,
-    SourceVerificationStatus,
-    verify_repository_source,
-)
-from slither_runner import (
-    AnalysisStatus,
-    is_directory_in_workspace,
-    run_slither_analysis,
-    sanitize_output_text,
-)
+_src_dir = str(Path(__file__).resolve().parent.parent / "src")
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
+
+try:
+    from defi_research.github_repository_resolver import (
+        ResolutionStatus,
+        SourceVerificationRecord,
+        SourceVerificationStatus,
+        verify_repository_source,
+    )
+    from defi_research.slither_runner import (
+        AnalysisStatus,
+        is_directory_in_workspace,
+        run_slither_analysis,
+        sanitize_output_text,
+    )
+except ImportError:
+    from github_repository_resolver import (
+        ResolutionStatus,
+        SourceVerificationRecord,
+        SourceVerificationStatus,
+        verify_repository_source,
+    )
+    from slither_runner import (
+        AnalysisStatus,
+        is_directory_in_workspace,
+        run_slither_analysis,
+        sanitize_output_text,
+    )
 
 
 class TestSlitherSecurityAudit(unittest.TestCase):

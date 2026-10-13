@@ -11,17 +11,40 @@ import sys
 import time
 from typing import Optional
 
-from config import CHAINS
-from contract_permission_scanner import ContractScanner
-from github_repository_resolver import normalize_github_repo_url, resolve_github_repo_from_slug
-from market_intelligence import get_high_value_targets
-from notrack_script import audit_vulnerable_targets, get_vulnerable_targets
-from security_intelligence import (
-    RetrievalStatus,
-    check_live_api_connectivity,
-    query_protocol_security_intelligence,
-)
-from slither_runner import AnalysisStatus, run_slither_analysis
+from pathlib import Path
+_src_dir = str(Path(__file__).resolve().parent / "src")
+_pkg_dir = str(Path(__file__).resolve().parent / "src" / "defi_research")
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
+if _pkg_dir not in sys.path:
+    sys.path.insert(0, _pkg_dir)
+
+try:
+    from defi_research.config import CHAINS
+    from defi_research.contract_permission_scanner import ContractScanner
+    from defi_research.github_repository_resolver import normalize_github_repo_url, resolve_github_repo_from_slug
+    from defi_research.market_intelligence import get_high_value_targets
+    from defi_research.notrack_script import audit_vulnerable_targets, get_vulnerable_targets
+    from defi_research.pipeline import run_pipeline, run_protocol_pipeline
+    from defi_research.security_intelligence import (
+        RetrievalStatus,
+        check_live_api_connectivity,
+        query_protocol_security_intelligence,
+    )
+    from defi_research.slither_runner import AnalysisStatus, run_slither_analysis
+except ImportError:
+    from config import CHAINS
+    from contract_permission_scanner import ContractScanner
+    from github_repository_resolver import normalize_github_repo_url, resolve_github_repo_from_slug
+    from market_intelligence import get_high_value_targets
+    from notrack_script import audit_vulnerable_targets, get_vulnerable_targets
+    from pipeline import run_pipeline, run_protocol_pipeline
+    from security_intelligence import (
+        RetrievalStatus,
+        check_live_api_connectivity,
+        query_protocol_security_intelligence,
+    )
+    from slither_runner import AnalysisStatus, run_slither_analysis
 
 # Asegurar codificación utf-8 en consola de Windows
 if hasattr(sys.stdout, "reconfigure"):
@@ -412,6 +435,109 @@ def cmd_intelligence(args, logger: logging.Logger):
         print(f"    - {lim}")
 
 
+def cmd_pipeline(args, logger):
+    """Ejecutar el pipeline end-to-end de 7 etapas (Fase 4)."""
+    print("=" * 80)
+    print("[*] COMANDO: PIPELINE END-TO-END DE INVESTIGACIÓN Y SEGURIDAD DEFI (FASE 4)")
+    print("=" * 80)
+
+    slug = getattr(args, "slug", None)
+    target_dir = getattr(args, "target_dir", None)
+    commit_hash = getattr(args, "commit", None)
+    output_dir = getattr(args, "output_dir", "./reports/pipeline")
+    live_check = getattr(args, "live_check", False)
+    as_json = getattr(args, "json", False)
+
+    if slug:
+        logger.info(f"Iniciando pipeline para protocolo individual: '{slug}'")
+        report = run_protocol_pipeline(
+            protocol_input=slug,
+            target_dir=target_dir,
+            commit_hash=commit_hash,
+            output_dir=output_dir,
+            live_provider=live_check,
+        )
+
+        if as_json:
+            print(report.to_json(indent=2))
+            return
+
+        print(f"\n[+] RESULTADO DEL PIPELINE — {report.protocol_name.upper()} ({report.defillama_slug})")
+        print("=" * 80)
+        print(f"    -> Estado General:           {report.overall_status.value}")
+        print(f"    -> Cadena Principal:         {report.chain or 'N/A'}")
+        print(f"    -> Categoría DeFi:           {report.category or 'N/A'}")
+        if report.tvl is not None:
+            print(f"    -> TVL Reportado:            ${report.tvl:,.2f}")
+        else:
+            print(f"    -> TVL Reportado:            N/A")
+        print(f"    -> Duración de Ejecución:    {report.duration_seconds:.2f} s")
+
+        print("\n[*] RESULTADOS POR ETAPA:")
+        for stage_name, s_info in report.stages.items():
+            status_str = s_info.get("status", "UNKNOWN")
+            msg_str = s_info.get("message", "")
+            print(f"    • [{status_str:<14}] {stage_name.replace('_', ' ').title()}: {msg_str}")
+
+        print("\n[*] DETALLES DE COMPONENTES:")
+        repo_str = report.repository_url or "No resuelto"
+        print(f"    • Repositorio GitHub:        {repo_str} ({report.repository_resolution_status})")
+        print(f"    • Verificación de Fuentes:   {report.source_verification_status or 'SKIPPED/NO_DIR'}")
+        if report.analyzed_commit:
+            print(f"    • Commit Git Analizado:      {report.analyzed_commit}")
+        print(f"    • Análisis Estático Slither: {report.static_analysis_status}")
+        if report.slither_findings_count is not None:
+            print(f"      - Hallazgos detectados:    {report.slither_findings_count}")
+        score_display = f"{report.security_score:.1f}/100" if report.security_score is not None else "Desconocido (N/A)"
+        print(f"    • Inteligencia CertiK:       {report.security_intelligence_status} (Score: {score_display})")
+
+        if output_dir:
+            print(f"\n[+] Reporte estructurado guardado en: {output_dir}")
+
+        if report.limitations:
+            print("\n[*] LIMITACIONES Y CONSIDERACIONES:")
+            for lim in report.limitations[:3]:
+                print(f"    - {lim}")
+
+    else:
+        limit = getattr(args, "limit", 10)
+        chain = getattr(args, "chain", None)
+        category = getattr(args, "category", None)
+        logger.info(f"Iniciando pipeline por lotes (límite: {limit}, cadena: {chain}, categoría: {category})")
+
+        summary = run_pipeline(
+            limit=limit,
+            chain=chain,
+            category=category,
+            output_dir=output_dir,
+            live_provider=live_check,
+        )
+
+        if as_json:
+            print(summary.to_json(indent=2))
+            return
+
+        print(f"\n[+] RESUMEN DEL PIPELINE POR LOTES ({summary.total_protocols} protocolos procesados)")
+        print("=" * 80)
+        print(f"    -> Completados (COMPLETED):  {summary.completed_count}")
+        print(f"    -> Parciales (PARTIAL):      {summary.partial_count}")
+        print(f"    -> Fallidos (FAILED):        {summary.failed_count}")
+
+        print("\n[*] PROTOCOLOS PROCESADOS:")
+        print(f"    {'PROTOCOLO':<25} {'ESTADO':<12} {'REPO GITHUB':<22} {'PUNTAJE CERTIK':<15}")
+        print("    " + "-" * 74)
+        for r_dict in summary.reports:
+            p_name = r_dict.get("protocol_name", "Unknown")[:24]
+            o_stat = r_dict.get("overall_status", "UNKNOWN")
+            r_stat = r_dict.get("repository", {}).get("resolution_status", "UNRESOLVED")
+            sec_val = r_dict.get("security_intelligence", {}).get("security_score")
+            score_str = f"{sec_val:.1f}" if sec_val is not None else "N/A"
+            print(f"    {p_name:<25} {o_stat:<12} {r_stat:<22} {score_str:<15}")
+
+        if output_dir:
+            print(f"\n[+] Reportes de protocolo y resumen guardados en: {output_dir}")
+
+
 def run_interactive_mode():
     """Modo interactivo con menú paso a paso para uso sencillo."""
     print_banner()
@@ -424,10 +550,12 @@ def run_interactive_mode():
         print("  [3] Ejecutar Pipeline NoTrack (DeFi Crítico: Lending, Bridges, DEXs)")
         print("  [4] Resolver repositorio GitHub de un protocolo (DefiLlama Slug / URL)")
         print("  [5] Ejecutar análisis estático Slither (Repositorio local verificado)")
-        print("  [6] Salir")
+        print("  [6] Consultar Inteligencia de Seguridad CertiK/Skynet")
+        print("  [7] Ejecutar Pipeline End-to-End Orchestrator (Fase 4)")
+        print("  [8] Salir")
 
         try:
-            choice = input("\nSelecciona una opción [1-6]: ").strip()
+            choice = input("\nSelecciona una opción [1-8]: ").strip()
         except (KeyboardInterrupt, EOFError):
             print("\nSaliendo...")
             sys.exit(0)
@@ -533,10 +661,51 @@ def run_interactive_mode():
             cmd_intelligence(args, logger)
 
         elif choice == "7":
+            mode_input = input("¿Deseas analizar un protocolo individual (1) o ejecutar en lote (2)? [1/2, default: 1]: ").strip()
+            if mode_input == "2":
+                lim_str = input("Cantidad máxima de protocolos [default: 5]: ").strip()
+                lim = int(lim_str) if lim_str else 5
+                print("Cadenas: 1. ethereum | 2. arbitrum | 3. polygon | 4. bsc | 5. todas")
+                c_input = input("Cadena [default: todas]: ").strip().lower()
+                chain = {"1": "ethereum", "2": "arbitrum", "3": "polygon", "4": "bsc"}.get(c_input, None if c_input in ("5", "") else c_input)
+                args = argparse.Namespace(
+                    slug=None,
+                    limit=lim,
+                    chain=chain,
+                    category=None,
+                    target_dir=None,
+                    commit=None,
+                    output_dir="./reports/pipeline",
+                    live_check=False,
+                    json=False,
+                    verbose=True,
+                )
+            else:
+                slug_opt = input("Slug DefiLlama del protocolo (ej. aave-v3, uniswap-v3): ").strip()
+                if not slug_opt:
+                    print("[!] El slug no puede estar vacío.")
+                    continue
+                tdir_opt = input("Directorio local del repositorio (opcional para Slither, Enter para omitir): ").strip() or None
+                commit_opt = input("Commit Git hash (opcional si HEAD existe, Enter para auto-detectar): ").strip() or None
+                args = argparse.Namespace(
+                    slug=slug_opt,
+                    limit=1,
+                    chain=None,
+                    category=None,
+                    target_dir=tdir_opt,
+                    commit=commit_opt,
+                    output_dir="./reports/pipeline",
+                    live_check=False,
+                    json=False,
+                    verbose=True,
+                )
+            cmd_pipeline(args, logger)
+
+        elif choice == "8":
             print("Hasta luego.")
             break
         else:
-            print("[!] Opción no reconocida. Por favor ingresa un número del 1 al 7.")
+            print("[!] Opción no reconocida. Por favor ingresa un número del 1 al 8.")
 
 
 def main():
@@ -596,6 +765,18 @@ def main():
     p_intel.add_argument("--live-check", action="store_true", help="Diagnóstico seguro opcional de conectividad y autenticación con la API en vivo de CertiK")
     p_intel.add_argument("--json", action="store_true", help="Imprimir salida en formato JSON legible por máquina")
 
+    # Subcomando: pipeline
+    p_pipeline = subparsers.add_parser("pipeline", parents=[common_parser], help="Ejecutar pipeline end-to-end de 7 etapas (Fase 4)")
+    p_pipeline.add_argument("--slug", default=None, help="Slug DefiLlama de un protocolo específico (ej. aave-v3)")
+    p_pipeline.add_argument("--limit", type=int, default=10, help="Cantidad máxima de protocolos en modo lote (default: 10)")
+    p_pipeline.add_argument("--chain", choices=["ethereum", "arbitrum", "polygon", "bsc"], default=None, help="Filtrar por cadena EVM")
+    p_pipeline.add_argument("--category", default=None, help="Filtrar por categoría DeFi (ej. Lending, DEXes, Yield)")
+    p_pipeline.add_argument("-t", "--target-dir", default=None, help="Directorio local para verificación de fuentes y Slither")
+    p_pipeline.add_argument("--commit", default=None, help="Commit Git específico a auditar")
+    p_pipeline.add_argument("--output-dir", default="./reports/pipeline", help="Directorio para almacenar reportes JSON estructurados")
+    p_pipeline.add_argument("--live-check", action="store_true", help="Opt-in para consultas a APIs en vivo autenticadas")
+    p_pipeline.add_argument("--json", action="store_true", help="Imprimir salida en formato JSON estructurado")
+
     args = parser.parse_args()
 
     # Si no se pasa ningún subcomando, lanzar el modo interactivo
@@ -617,6 +798,8 @@ def main():
         cmd_slither(args, logger)
     elif args.subcommand == "intelligence":
         cmd_intelligence(args, logger)
+    elif args.subcommand == "pipeline":
+        cmd_pipeline(args, logger)
 
 
 if __name__ == "__main__":

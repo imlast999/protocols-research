@@ -17,8 +17,10 @@ venv/
 .venv/
 env/
 
-# Slither scan output artifacts
-reports/slither/
+# Runtime scan and pipeline output artifacts
+reports/**/*.json
+reports/*.json
+!reports/**/.gitkeep
 scratch/
 
 # IDE & Editor files

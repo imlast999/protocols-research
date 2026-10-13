@@ -7,27 +7,51 @@ secret redaction, error conditions, and strict decoupling from Slither eligibili
 
 import json
 import os
+import sys
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import requests
 
-from github_repository_resolver import ResolutionStatus, SourceVerificationRecord, SourceVerificationStatus, evaluate_slither_eligibility
-from security_intelligence import (
-    CERTIK_CHAIN_PREFIX_MAP,
-    AuditRecord,
-    CertikSkynetProvider,
-    MatchConfidence,
-    ProtocolQuery,
-    RetrievalStatus,
-    SecurityIntelligenceResult,
-    SecurityScore,
-    check_live_api_connectivity,
-    normalize_chain_prefix,
-    query_protocol_security_intelligence,
-    sanitize_secret_text,
-)
-from slither_runner import AnalysisStatus, run_slither_analysis
+_src_dir = str(Path(__file__).resolve().parent.parent / "src")
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
+
+try:
+    from defi_research.github_repository_resolver import ResolutionStatus, SourceVerificationRecord, SourceVerificationStatus, evaluate_slither_eligibility
+    from defi_research.security_intelligence import (
+        CERTIK_CHAIN_PREFIX_MAP,
+        AuditRecord,
+        CertikSkynetProvider,
+        MatchConfidence,
+        ProtocolQuery,
+        RetrievalStatus,
+        SecurityIntelligenceResult,
+        SecurityScore,
+        check_live_api_connectivity,
+        normalize_chain_prefix,
+        query_protocol_security_intelligence,
+        sanitize_secret_text,
+    )
+    from defi_research.slither_runner import AnalysisStatus, run_slither_analysis
+except ImportError:
+    from github_repository_resolver import ResolutionStatus, SourceVerificationRecord, SourceVerificationStatus, evaluate_slither_eligibility
+    from security_intelligence import (
+        CERTIK_CHAIN_PREFIX_MAP,
+        AuditRecord,
+        CertikSkynetProvider,
+        MatchConfidence,
+        ProtocolQuery,
+        RetrievalStatus,
+        SecurityIntelligenceResult,
+        SecurityScore,
+        check_live_api_connectivity,
+        normalize_chain_prefix,
+        query_protocol_security_intelligence,
+        sanitize_secret_text,
+    )
+    from slither_runner import AnalysisStatus, run_slither_analysis
 
 
 class TestSecurityIntelligence(unittest.TestCase):

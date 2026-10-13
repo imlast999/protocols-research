@@ -27,14 +27,24 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
-from github_repository_resolver import (
-    ResolutionStatus,
-    SlitherEligibilityStatus,
-    SourceVerificationRecord,
-    SourceVerificationStatus,
-    evaluate_slither_eligibility,
-    verify_repository_source,
-)
+try:
+    from defi_research.github_repository_resolver import (
+        ResolutionStatus,
+        SlitherEligibilityStatus,
+        SourceVerificationRecord,
+        SourceVerificationStatus,
+        evaluate_slither_eligibility,
+        verify_repository_source,
+    )
+except ImportError:
+    from github_repository_resolver import (
+        ResolutionStatus,
+        SlitherEligibilityStatus,
+        SourceVerificationRecord,
+        SourceVerificationStatus,
+        evaluate_slither_eligibility,
+        verify_repository_source,
+    )
 
 logger = logging.getLogger("SlitherRunner")
 
@@ -130,7 +140,8 @@ class SlitherAnalysisResult:
 def get_default_allowed_workspaces() -> List[str]:
     """Returns the default allowed workspace directories."""
     base_dir = os.path.abspath(os.path.dirname(__file__))
-    allowed = [base_dir]
+    repo_root = os.path.abspath(os.path.join(base_dir, "..", ".."))
+    allowed = [base_dir, repo_root, os.path.abspath(".")]
 
     # Include explicit environment workspace if configured
     env_ws = os.getenv("SLITHER_ALLOWED_WORKSPACE")

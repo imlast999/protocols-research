@@ -7,22 +7,42 @@ Runs 100% deterministically offline without requiring Slither or external networ
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from github_repository_resolver import (
-    ResolutionStatus,
-    SourceVerificationRecord,
-    SourceVerificationStatus,
-)
-from slither_runner import (
-    AnalysisStatus,
-    check_slither_availability,
-    is_directory_in_workspace,
-    parse_slither_json,
-    run_slither_analysis,
-)
+_src_dir = str(Path(__file__).resolve().parent.parent / "src")
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
+
+try:
+    from defi_research.github_repository_resolver import (
+        ResolutionStatus,
+        SourceVerificationRecord,
+        SourceVerificationStatus,
+    )
+    from defi_research.slither_runner import (
+        AnalysisStatus,
+        check_slither_availability,
+        is_directory_in_workspace,
+        parse_slither_json,
+        run_slither_analysis,
+    )
+except ImportError:
+    from github_repository_resolver import (
+        ResolutionStatus,
+        SourceVerificationRecord,
+        SourceVerificationStatus,
+    )
+    from slither_runner import (
+        AnalysisStatus,
+        check_slither_availability,
+        is_directory_in_workspace,
+        parse_slither_json,
+        run_slither_analysis,
+    )
 
 
 class TestSlitherRunner(unittest.TestCase):
