@@ -71,6 +71,7 @@ hidden_imports = [
     "defi_research.gui.app",
     "defi_research.gui.main_window",
     "defi_research.gui.theme",
+    "defi_research.gui.components",
     "defi_research.gui.workers",
     "defi_research.pipeline",
     "defi_research.contract_permission_scanner",

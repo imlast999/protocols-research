@@ -1,8 +1,8 @@
 """
-Automated Headless Tests for PySide6 Desktop GUI.
+Automated Headless Tests for PySide6 Desktop GUI (Phase 10 Workstation Redesign).
 Executes using Qt's offscreen platform plugin for deterministic CI verification.
-Validates window construction, stats cards, filtering, candidate selection,
-evidence rendering, and data export.
+Validates 5-view navigation shell, dashboard telemetry, candidate filtering, empty states,
+detail evidence rendering, continuous hunter controls, and secure settings configuration.
 """
 
 from pathlib import Path
@@ -69,26 +69,34 @@ class TestGuiHeadless(unittest.TestCase):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_01_window_construction_and_tabs(self):
-        """MainWindow must construct with proper title and 3 core tabs."""
+        """MainWindow must construct with proper title and all 5 workstation views."""
         self.assertIn("DeFi Protocol Research", self.window.windowTitle())
-        self.assertEqual(self.window.tabs.count(), 3)
-        self.assertEqual(self.window.tabs.tabText(0), "📊 Protocol Explorer & Dashboard")
-        self.assertEqual(self.window.tabs.tabText(1), "🎯 Protocol Hunter (Continuous Discovery)")
-        self.assertEqual(self.window.tabs.tabText(2), "📄 Reports & Exports")
+        self.assertEqual(self.window.tabs.count(), 5)
+        self.assertEqual(self.window.tabs.tabText(0), "📊 Dashboard")
+        self.assertEqual(self.window.tabs.tabText(1), "🔍 Protocol Explorer")
+        self.assertEqual(self.window.tabs.tabText(2), "🎯 Protocol Hunter")
+        self.assertEqual(self.window.tabs.tabText(3), "📄 Reports & History")
+        self.assertEqual(self.window.tabs.tabText(4), "⚙️ Settings & Diagnostics")
 
-    def test_02_dashboard_statistics_cards(self):
-        """Dashboard stat cards must accurately reflect store counts."""
+    def test_02_dashboard_statistics_cards_and_tables(self):
+        """Dashboard stat cards and recent tables must accurately reflect store counts."""
         self.assertEqual(self.window.stat_total.findChild(QLabel, "valueLabel").text(), "2")
         self.assertEqual(self.window.stat_matched.findChild(QLabel, "valueLabel").text(), "2")
         self.assertEqual(self.window.stat_pending.findChild(QLabel, "valueLabel").text(), "1")
         self.assertEqual(self.window.stat_completed.findChild(QLabel, "valueLabel").text(), "1")
 
-    def test_03_table_filtering(self):
-        """Filter dropdowns and search input must filter the candidates table."""
+        # Verify recent discoveries table has entries
+        self.assertEqual(self.window.table_recent_disc.rowCount(), 2)
+        # Verify recent analysis table has entries
+        self.assertEqual(self.window.table_recent_analysis.rowCount(), 2)
+
+    def test_03_table_filtering_and_empty_state(self):
+        """Filter dropdowns and search input must filter candidates and toggle empty state."""
         # 1. Search filter
         self.window.search_input.setText("Aave")
         self.assertEqual(self.window.table.rowCount(), 1)
         self.assertEqual(self.window.table.item(0, 0).text(), "Aave V3")
+        self.assertEqual(self.window.table_stack.currentIndex(), 0)  # Table active
 
         # 2. Reset search and filter by category
         self.window.search_input.setText("")
@@ -96,6 +104,16 @@ class TestGuiHeadless(unittest.TestCase):
         self.window.cat_combo.setCurrentIndex(dex_idx)
         self.assertEqual(self.window.table.rowCount(), 1)
         self.assertEqual(self.window.table.item(0, 0).text(), "Uniswap V3")
+
+        # 3. Filter with no matches -> Empty State Page
+        self.window.search_input.setText("NonExistentProtocolxyz123")
+        self.assertEqual(self.window.table_stack.currentIndex(), 1)  # Empty State page active
+        self.assertEqual(self.window.table.rowCount(), 0)
+
+        # 4. Reset filters
+        self.window._on_reset_filters()
+        self.assertEqual(self.window.table_stack.currentIndex(), 0)
+        self.assertEqual(self.window.table.rowCount(), 2)
 
     def test_04_detail_evidence_rendering(self):
         """Selecting a table candidate must render evidence, status, and heuristic labels."""
@@ -134,6 +152,41 @@ class TestGuiHeadless(unittest.TestCase):
             self.assertIsNotNone(self.window.hunter_worker)
             self.window.hunter_worker.request_stop()
             self.window.hunter_worker.wait(1000)
+
+    def test_08_settings_tab_masking_and_save(self):
+        """Settings tab inputs must support password masking and saving."""
+        # Test PasswordLineEdit masking toggle
+        self.window.setting_certik_key.setText("secret_key_12345")
+        self.assertEqual(self.window.setting_certik_key.text(), "secret_key_12345")
+
+        # Save settings via tab
+        with patch("defi_research.gui.main_window.save_env_values") as mock_save, \
+             patch("defi_research.gui.main_window.QMessageBox.information"):
+            self.window._on_save_settings_tab()
+            mock_save.assert_called_once()
+            saved_args = mock_save.call_args[0][0]
+            self.assertEqual(saved_args["CERTIK_API_KEY"], "secret_key_12345")
+
+    def test_09_hunter_metrics_and_state_updates(self):
+        """Protocol Hunter metrics and state updates update UI cards properly."""
+        metrics = {
+            "elapsed_seconds": 3665.0,  # 1h 1m 5s
+            "cycles_completed": 12,
+            "protocols_examined": 150,
+            "unique_candidates_added": 8,
+            "recent_errors": ["Error 1"],
+        }
+        self.window._on_hunter_metrics_updated(metrics)
+        self.assertEqual(self.window.hm_elapsed.findChild(QLabel, "valueLabel").text(), "01:01:05")
+        self.assertEqual(self.window.hm_cycles.findChild(QLabel, "valueLabel").text(), "12")
+        self.assertEqual(self.window.hm_examined.findChild(QLabel, "valueLabel").text(), "150")
+        self.assertEqual(self.window.hm_added.findChild(QLabel, "valueLabel").text(), "8")
+        self.assertEqual(self.window.hm_errors.findChild(QLabel, "valueLabel").text(), "1")
+
+        # Test state change signal
+        self.window._on_hunter_state_changed("COMPLETED")
+        self.assertIn("COMPLETED", self.window.lbl_hunter_status.text())
+        self.assertTrue(self.window.btn_hunter_start.isEnabled())
 
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
 """
-Main Application Window for DeFi Protocol Research & Protocol Hunter.
-Implements the polished dark-themed dashboard, candidate explorer,
-protocol detail inspector, continuous discovery manager, and report viewer.
+Main Application Window for DeFi Protocol Research & Security Intelligence Workstation.
+Implements the polished dark-navy workstation UI, 5-view navigation shell,
+live telemetry dashboard, protocol candidate explorer, detail security inspector,
+continuous hunter monitoring workspace, reports viewer, and secure settings.
 """
 
 from datetime import datetime, timezone
@@ -39,6 +40,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QSplitter,
+    QStackedWidget,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -47,7 +49,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from defi_research.config import CHAINS
+from defi_research.config import CHAINS, save_env_values
 from defi_research.discovery.discovery_store import (
     CURRENT_SCHEMA_VERSION,
     DiscoveredProtocolRecord,
@@ -55,21 +57,42 @@ from defi_research.discovery.discovery_store import (
     get_default_data_dir,
 )
 from defi_research.discovery.protocol_hunter import HunterConfig, HunterState
-from defi_research.gui.theme import DARK_THEME_QSS
+from defi_research.gui.components import (
+    EmptyStateWidget,
+    PasswordLineEdit,
+    StatCardWidget,
+    StatusBadgeWidget,
+)
+from defi_research.gui.theme import (
+    COLOR_BG_MAIN,
+    COLOR_BORDER,
+    COLOR_CARD,
+    COLOR_CYAN_ACCENT,
+    COLOR_DANGER,
+    COLOR_NEUTRAL,
+    COLOR_SUCCESS,
+    COLOR_SURFACE,
+    COLOR_TEXT_MUTED,
+    COLOR_TEXT_PRIMARY,
+    COLOR_TEXT_SECONDARY,
+    COLOR_WARNING,
+    DARK_THEME_QSS,
+)
 from defi_research.gui.workers import HunterWorker, SingleAnalysisWorker
+from defi_research.security_intelligence import check_live_api_connectivity
 from defi_research.slither_runner import check_docker_availability, check_slither_availability
 
 logger = logging.getLogger("MainWindow")
 
 
 class MainWindow(QMainWindow):
-    """Main window of the DeFi Protocol Research Desktop Application."""
+    """Main window of the DeFi Protocol Research Workstation."""
 
     def __init__(self, store: Optional[DiscoveryStore] = None):
         super().__init__()
-        self.setWindowTitle("DeFi Protocol Research Suite — Protocol Hunter")
-        self.resize(1340, 880)
-        self.setMinimumSize(1024, 680)
+        self.setWindowTitle("DeFi Protocol Research Suite — Security & Intelligence Workstation")
+        self.resize(1380, 900)
+        self.setMinimumSize(1024, 700)
 
         self.store = store or DiscoveryStore()
         self.data_dir = get_default_data_dir()
@@ -84,7 +107,7 @@ class MainWindow(QMainWindow):
         self._check_environment_status()
         self._refresh_table_and_dashboard()
 
-        # UI ticker timer for elapsed time updates
+        # UI ticker timer for elapsed time updates and periodic status refresh
         self.ui_timer = QTimer(self)
         self.ui_timer.timeout.connect(self._on_ui_tick)
         self.ui_timer.start(1000)
@@ -99,25 +122,57 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(14, 12, 14, 12)
         main_layout.setSpacing(10)
 
-        # 1. Top Header Bar (App Title & Diagnostic Pills)
-        header_layout = QHBoxLayout()
+        # ---------------------------------------------------------------------
+        # 1. TOP WORKSTATION HEADER BAR
+        # ---------------------------------------------------------------------
+        header_frame = QFrame()
+        header_frame.setObjectName("cardFrame")
+        header_layout = QHBoxLayout(header_frame)
+        header_layout.setContentsMargins(16, 10, 16, 10)
+        header_layout.setSpacing(12)
 
-        title_label = QLabel("🛡️ DeFi Protocol Research Suite")
+        # Brand / Title
+        brand_layout = QVBoxLayout()
+        brand_layout.setSpacing(2)
+
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        brand_icon = QLabel("🛡️")
+        brand_icon.setStyleSheet("font-size: 18px;")
+        title_row.addWidget(brand_icon)
+
+        title_label = QLabel("DEFI PROTOCOL RESEARCH WORKSTATION")
         title_font = QFont()
-        title_font.setPointSize(15)
+        title_font.setPointSize(13)
         title_font.setBold(True)
         title_label.setFont(title_font)
-        header_layout.addWidget(title_label)
+        title_label.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; font-weight: 800; letter-spacing: 0.5px;")
+        title_row.addWidget(title_label)
 
-        sub_label = QLabel("v0.4.0 — Protocol Hunter")
-        sub_label.setStyleSheet("color: #8b949e; margin-left: 6px;")
-        header_layout.addWidget(sub_label)
+        ver_badge = QLabel("v0.4.0 • Enterprise")
+        ver_badge.setStyleSheet(f"""
+            background-color: #0c4a6e;
+            color: {COLOR_CYAN_ACCENT};
+            border: 1px solid #0284c7;
+            border-radius: 4px;
+            padding: 1px 6px;
+            font-size: 10px;
+            font-weight: bold;
+        """)
+        title_row.addWidget(ver_badge)
+        title_row.addStretch()
+        brand_layout.addLayout(title_row)
 
+        sub_label = QLabel("Continuous Protocol Discovery, Static Analysis & On-Chain Security Intelligence")
+        sub_label.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px;")
+        brand_layout.addWidget(sub_label)
+
+        header_layout.addLayout(brand_layout)
         header_layout.addStretch()
 
-        # Environment status pills
+        # Environment status indicators
         self.docker_pill = QPushButton("Docker: Checking...")
-        self.docker_pill.setToolTip("Click for Docker execution status details")
+        self.docker_pill.setToolTip("Click for Docker & Slither execution status details")
         self.docker_pill.clicked.connect(self._show_docker_status_dialog)
         header_layout.addWidget(self.docker_pill)
 
@@ -126,47 +181,55 @@ class MainWindow(QMainWindow):
         self.certik_pill.clicked.connect(self._show_certik_status_dialog)
         header_layout.addWidget(self.certik_pill)
 
-        self.btn_settings = QPushButton("⚙️ Settings & API Keys")
+        self.btn_settings = QPushButton("⚙️ Settings & Keys")
         self.btn_settings.setToolTip("Configure CertiK, Explorer API keys, and Slither backend")
-        self.btn_settings.clicked.connect(self._show_settings_dialog)
+        self.btn_settings.clicked.connect(lambda: self.tabs.setCurrentIndex(4))
         header_layout.addWidget(self.btn_settings)
 
-        main_layout.addLayout(header_layout)
+        main_layout.addWidget(header_frame)
 
-        # 2. Main Tab Widget
+        # ---------------------------------------------------------------------
+        # 2. MAIN 5-VIEW TAB NAVIGATION SHELL
+        # ---------------------------------------------------------------------
         self.tabs = QTabWidget()
         main_layout.addWidget(self.tabs)
 
         self.dashboard_tab = QWidget()
+        self.explorer_tab = QWidget()
         self.hunter_tab = QWidget()
         self.reports_tab = QWidget()
+        self.settings_tab = QWidget()
 
-        self.tabs.addTab(self.dashboard_tab, "📊 Protocol Explorer & Dashboard")
-        self.tabs.addTab(self.hunter_tab, "🎯 Protocol Hunter (Continuous Discovery)")
-        self.tabs.addTab(self.reports_tab, "📄 Reports & Exports")
+        self.tabs.addTab(self.dashboard_tab, "📊 Dashboard")
+        self.tabs.addTab(self.explorer_tab, "🔍 Protocol Explorer")
+        self.tabs.addTab(self.hunter_tab, "🎯 Protocol Hunter")
+        self.tabs.addTab(self.reports_tab, "📄 Reports & History")
+        self.tabs.addTab(self.settings_tab, "⚙️ Settings & Diagnostics")
 
         self._setup_dashboard_tab()
+        self._setup_explorer_tab()
         self._setup_hunter_tab()
         self._setup_reports_tab()
+        self._setup_settings_tab()
 
     # -------------------------------------------------------------------------
-    # TAB 1: PROTOCOL EXPLORER & DASHBOARD
+    # TAB 0: DASHBOARD (OVERVIEW & TELEMETRY)
     # -------------------------------------------------------------------------
     def _setup_dashboard_tab(self):
         tab_layout = QVBoxLayout(self.dashboard_tab)
-        tab_layout.setContentsMargins(10, 10, 10, 10)
-        tab_layout.setSpacing(10)
+        tab_layout.setContentsMargins(12, 12, 12, 12)
+        tab_layout.setSpacing(12)
 
-        # 1. Statistics Cards Row
+        # 1. Primary Metrics Cards Row
         stats_layout = QHBoxLayout()
         stats_layout.setSpacing(10)
 
-        self.stat_total = self._create_stat_card("Total Discovered", "0", "#58a6ff")
-        self.stat_matched = self._create_stat_card("Filter Matches", "0", "#3fb950")
-        self.stat_pending = self._create_stat_card("Pending Analysis", "0", "#d29922")
-        self.stat_completed = self._create_stat_card("Completed Analyses", "0", "#2ea043")
-        self.stat_unavailable = self._create_stat_card("Failed / Unavailable", "0", "#f85149")
-        self.stat_last_cycle = self._create_stat_card("Last Discovery Cycle", "Never", "#8b949e")
+        self.stat_total = StatCardWidget("Total Discovered", "0", COLOR_CYAN_ACCENT, "All store records")
+        self.stat_matched = StatCardWidget("Filter Matches", "0", COLOR_SUCCESS, "Current criteria")
+        self.stat_pending = StatCardWidget("Pending Analysis", "0", COLOR_WARNING, "Unanalyzed")
+        self.stat_completed = StatCardWidget("Completed Analyses", "0", COLOR_SUCCESS, "Static or Intel")
+        self.stat_unavailable = StatCardWidget("Failed / Unavailable", "0", COLOR_DANGER, "Errors / Skipped")
+        self.stat_last_cycle = StatCardWidget("Last Discovery Cycle", "Never", COLOR_NEUTRAL, "UTC Timestamp")
 
         stats_layout.addWidget(self.stat_total)
         stats_layout.addWidget(self.stat_matched)
@@ -176,10 +239,90 @@ class MainWindow(QMainWindow):
         stats_layout.addWidget(self.stat_last_cycle)
         tab_layout.addLayout(stats_layout)
 
-        # 2. Filters & Search Control Bar
+        # 2. Quick Workflow Navigation Bar & System Diagnostics
+        dash_banner = QFrame()
+        dash_banner.setObjectName("cardFrame")
+        dash_banner_layout = QHBoxLayout(dash_banner)
+        dash_banner_layout.setContentsMargins(16, 12, 16, 12)
+        dash_banner_layout.setSpacing(16)
+
+        banner_text_layout = QVBoxLayout()
+        banner_text_layout.setSpacing(2)
+        b_title = QLabel("Research Operations & Telemetry")
+        b_title.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {COLOR_TEXT_PRIMARY};")
+        b_desc = QLabel("Explore candidates, initiate continuous discovery sessions, or review static analysis evidence.")
+        b_desc.setStyleSheet(f"font-size: 11px; color: {COLOR_TEXT_MUTED};")
+        banner_text_layout.addWidget(b_title)
+        banner_text_layout.addWidget(b_desc)
+        dash_banner_layout.addLayout(banner_text_layout)
+
+        dash_banner_layout.addStretch()
+
+        btn_go_explorer = QPushButton("🔍 Open Protocol Explorer")
+        btn_go_explorer.clicked.connect(lambda: self.tabs.setCurrentIndex(1))
+        dash_banner_layout.addWidget(btn_go_explorer)
+
+        btn_go_hunter = QPushButton("🎯 Launch Protocol Hunter")
+        btn_go_hunter.setObjectName("primaryBtn")
+        btn_go_hunter.clicked.connect(lambda: self.tabs.setCurrentIndex(2))
+        dash_banner_layout.addWidget(btn_go_hunter)
+
+        btn_quick_cycle = QPushButton("🔄 Run Single Cycle")
+        btn_quick_cycle.clicked.connect(self._on_run_single_cycle)
+        dash_banner_layout.addWidget(btn_quick_cycle)
+
+        tab_layout.addWidget(dash_banner)
+
+        # 3. Two side-by-side Tables: Recent Discoveries & Recent Analysis Activity
+        tables_splitter = QSplitter(Qt.Horizontal)
+
+        # Left: Recent Discoveries
+        recent_disc_group = QGroupBox("Recent Discoveries")
+        recent_disc_layout = QVBoxLayout(recent_disc_group)
+        recent_disc_layout.setContentsMargins(8, 10, 8, 8)
+
+        self.table_recent_disc = QTableWidget()
+        self.table_recent_disc.setColumnCount(4)
+        self.table_recent_disc.setHorizontalHeaderLabels(["Protocol Name", "Chain", "TVL ($)", "Updated"])
+        self.table_recent_disc.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table_recent_disc.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table_recent_disc.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table_recent_disc.horizontalHeader().setStretchLastSection(True)
+        self.table_recent_disc.itemDoubleClicked.connect(self._on_recent_discovery_double_clicked)
+        recent_disc_layout.addWidget(self.table_recent_disc)
+        tables_splitter.addWidget(recent_disc_group)
+
+        # Right: Recent Analysis Activity
+        recent_analysis_group = QGroupBox("Security Analysis Activity")
+        recent_analysis_layout = QVBoxLayout(recent_analysis_group)
+        recent_analysis_layout.setContentsMargins(8, 10, 8, 8)
+
+        self.table_recent_analysis = QTableWidget()
+        self.table_recent_analysis.setColumnCount(4)
+        self.table_recent_analysis.setHorizontalHeaderLabels(["Protocol Name", "Slither Status", "CertiK Grade", "Resolution"])
+        self.table_recent_analysis.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table_recent_analysis.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table_recent_analysis.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table_recent_analysis.horizontalHeader().setStretchLastSection(True)
+        self.table_recent_analysis.itemDoubleClicked.connect(self._on_recent_analysis_double_clicked)
+        recent_analysis_layout.addWidget(self.table_recent_analysis)
+        tables_splitter.addWidget(recent_analysis_group)
+
+        tables_splitter.setSizes([600, 600])
+        tab_layout.addWidget(tables_splitter)
+
+    # -------------------------------------------------------------------------
+    # TAB 1: PROTOCOL EXPLORER & DETAIL INSPECTOR
+    # -------------------------------------------------------------------------
+    def _setup_explorer_tab(self):
+        tab_layout = QVBoxLayout(self.explorer_tab)
+        tab_layout.setContentsMargins(10, 10, 10, 10)
+        tab_layout.setSpacing(10)
+
+        # 1. Filters & Search Control Bar
         filter_box = QGroupBox("Filter Candidates")
         filter_layout = QHBoxLayout(filter_box)
-        filter_layout.setContentsMargins(10, 8, 10, 8)
+        filter_layout.setContentsMargins(12, 10, 12, 10)
         filter_layout.setSpacing(12)
 
         # Search box
@@ -228,22 +371,32 @@ class MainWindow(QMainWindow):
         self.cat_combo.currentIndexChanged.connect(self._on_filter_changed)
         filter_layout.addWidget(self.cat_combo)
 
+        # Reset button
+        self.btn_reset_filters = QPushButton("↺ Reset")
+        self.btn_reset_filters.setToolTip("Reset all filters to default")
+        self.btn_reset_filters.clicked.connect(self._on_reset_filters)
+        filter_layout.addWidget(self.btn_reset_filters)
+
         # Refresh / Run Cycle button
-        self.btn_quick_fetch = QPushButton("🔄 Run Discovery Cycle")
+        self.btn_quick_fetch = QPushButton("🔄 Run Cycle")
         self.btn_quick_fetch.setObjectName("primaryBtn")
         self.btn_quick_fetch.clicked.connect(self._on_run_single_cycle)
         filter_layout.addWidget(self.btn_quick_fetch)
 
         tab_layout.addWidget(filter_box)
 
-        # 3. Main Splitter: Candidates Table (Left/Center) + Protocol Details (Right)
+        # 2. Main Splitter: Candidates Table (Left) + Protocol Details (Right)
         splitter = QSplitter(Qt.Horizontal)
 
-        # Left: Table
+        # Left: Table Stack (Container with Table and Empty State)
         table_container = QWidget()
         table_layout = QVBoxLayout(table_container)
         table_layout.setContentsMargins(0, 0, 0, 0)
+        table_layout.setSpacing(0)
 
+        self.table_stack = QStackedWidget()
+
+        # Page 0: Active Table
         self.table = QTableWidget()
         self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels([
@@ -262,42 +415,25 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.itemSelectionChanged.connect(self._on_table_selection_changed)
-        table_layout.addWidget(self.table)
+        self.table_stack.addWidget(self.table)
 
+        # Page 1: Empty State
+        self.table_empty_state = EmptyStateWidget(
+            icon_text="🔍",
+            title="No Matching Candidates Found",
+            description="No protocols in the database match your current search and filter criteria. Adjust your filters or run a discovery cycle.",
+        )
+        self.table_stack.addWidget(self.table_empty_state)
+
+        table_layout.addWidget(self.table_stack)
         splitter.addWidget(table_container)
 
         # Right: Detail Inspector
         self.detail_panel = self._create_detail_inspector_panel()
         splitter.addWidget(self.detail_panel)
-        splitter.setSizes([780, 520])
+        splitter.setSizes([800, 520])
 
         tab_layout.addWidget(splitter)
-
-    def _create_stat_card(self, title: str, value: str, color: str) -> QFrame:
-        card = QFrame()
-        card.setFrameShape(QFrame.StyledPanel)
-        card.setStyleSheet(f"""
-            QFrame {{
-                background-color: #161b22;
-                border: 1px solid #30363d;
-                border-radius: 6px;
-                padding: 6px 12px;
-            }}
-        """)
-        c_layout = QVBoxLayout(card)
-        c_layout.setContentsMargins(4, 4, 4, 4)
-        c_layout.setSpacing(2)
-
-        t_lbl = QLabel(title)
-        t_lbl.setStyleSheet("color: #8b949e; font-size: 11px; font-weight: 600;")
-        c_layout.addWidget(t_lbl)
-
-        v_lbl = QLabel(value)
-        v_lbl.setObjectName("valueLabel")
-        v_lbl.setStyleSheet(f"color: {color}; font-size: 18px; font-weight: bold;")
-        c_layout.addWidget(v_lbl)
-
-        return card
 
     def _create_detail_inspector_panel(self) -> QWidget:
         panel = QWidget()
@@ -310,6 +446,38 @@ class MainWindow(QMainWindow):
         g_layout.setContentsMargins(10, 12, 10, 10)
         g_layout.setSpacing(8)
 
+        # Header bar with Protocol Title
+        top_header_layout = QHBoxLayout()
+        self.lbl_proto_title = QLabel("Select a protocol to inspect evidence")
+        f = QFont()
+        f.setPointSize(13)
+        f.setBold(True)
+        self.lbl_proto_title.setFont(f)
+        self.lbl_proto_title.setStyleSheet(f"color: {COLOR_CYAN_ACCENT};")
+        top_header_layout.addWidget(self.lbl_proto_title)
+        top_header_layout.addStretch()
+        g_layout.addLayout(top_header_layout)
+
+        # Action Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(6)
+
+        self.btn_run_analysis = QPushButton("⚡ Run Pipeline Analysis")
+        self.btn_run_analysis.setObjectName("primaryBtn")
+        self.btn_run_analysis.clicked.connect(self._on_run_deep_analysis_selected)
+        btn_layout.addWidget(self.btn_run_analysis)
+
+        self.btn_open_repo = QPushButton("🔗 Open Repo")
+        self.btn_open_repo.clicked.connect(self._on_open_selected_repo)
+        btn_layout.addWidget(self.btn_open_repo)
+
+        self.btn_copy_address = QPushButton("📋 Copy Addr")
+        self.btn_copy_address.setToolTip("Copy protocol primary contract address to clipboard")
+        self.btn_copy_address.clicked.connect(self._on_copy_selected_address)
+        btn_layout.addWidget(self.btn_copy_address)
+
+        g_layout.addLayout(btn_layout)
+
         # Scrollable metadata area
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -318,53 +486,31 @@ class MainWindow(QMainWindow):
         scroll_content = QWidget()
         self.detail_layout = QVBoxLayout(scroll_content)
         self.detail_layout.setContentsMargins(0, 0, 4, 0)
-        self.detail_layout.setSpacing(10)
-
-        # Protocol Header
-        self.lbl_proto_title = QLabel("Select a protocol to inspect evidence")
-        f = QFont()
-        f.setPointSize(14)
-        f.setBold(True)
-        self.lbl_proto_title.setFont(f)
-        self.lbl_proto_title.setStyleSheet("color: #58a6ff;")
-        self.detail_layout.addWidget(self.lbl_proto_title)
+        self.detail_layout.setSpacing(8)
 
         # Text summary view
         self.detail_text = QTextEdit()
         self.detail_text.setReadOnly(True)
-        self.detail_text.setStyleSheet("""
-            QTextEdit {
-                background-color: #0d1117;
-                border: 1px solid #30363d;
+        self.detail_text.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {COLOR_BG_MAIN};
+                border: 1px solid {COLOR_BORDER};
                 border-radius: 6px;
                 font-family: 'Segoe UI', sans-serif;
                 font-size: 12px;
-                color: #c9d1d9;
-            }
+                color: {COLOR_TEXT_PRIMARY};
+                line-height: 1.4;
+            }}
         """)
         self.detail_layout.addWidget(self.detail_text)
 
         scroll.setWidget(scroll_content)
         g_layout.addWidget(scroll)
 
-        # Action Buttons
-        btn_layout = QHBoxLayout()
-        self.btn_run_analysis = QPushButton("⚡ Run Pipeline Analysis")
-        self.btn_run_analysis.setObjectName("primaryBtn")
-        self.btn_run_analysis.clicked.connect(self._on_run_deep_analysis_selected)
-        btn_layout.addWidget(self.btn_run_analysis)
-
-        self.btn_open_repo = QPushButton("🔗 Open Repository")
-        self.btn_open_repo.clicked.connect(self._on_open_selected_repo)
-        btn_layout.addWidget(self.btn_open_repo)
-
-        g_layout.addLayout(btn_layout)
         panel_layout.addWidget(group)
-
         return panel
-
     # -------------------------------------------------------------------------
-    # TAB 2: PROTOCOL HUNTER (CONTINUOUS DISCOVERY)
+    # TAB 2: PROTOCOL HUNTER (CONTINUOUS DISCOVERY WORKSPACE)
     # -------------------------------------------------------------------------
     def _setup_hunter_tab(self):
         layout = QVBoxLayout(self.hunter_tab)
@@ -374,16 +520,15 @@ class MainWindow(QMainWindow):
         # 1. Config Box
         cfg_box = QGroupBox("Continuous Discovery Configuration (Protocol Hunter)")
         cfg_layout = QGridLayout(cfg_box)
-        cfg_layout.setContentsMargins(12, 14, 12, 12)
+        cfg_layout.setContentsMargins(14, 14, 14, 14)
         cfg_layout.setSpacing(10)
 
         # Notice
         notice_lbl = QLabel(
-            "ℹ️ <b>Protocol Hunter</b> continuously discovers and monitors active DeFi protocols on DefiLlama.<br>"
-            "This is research and security intelligence collection, <b>not cryptocurrency mining</b>. "
-            "No wallet actions or blockchain transactions are performed."
+            "ℹ️ <b>Protocol Hunter</b> runs an autonomous research cycle to discover, filter, and track active DeFi protocols.<br>"
+            "This collects cybersecurity and financial intelligence from DefiLlama and GitHub. <b>No cryptocurrency mining or wallet actions are performed.</b>"
         )
-        notice_lbl.setStyleSheet("color: #58a6ff; margin-bottom: 6px;")
+        notice_lbl.setStyleSheet(f"color: {COLOR_CYAN_ACCENT}; margin-bottom: 6px;")
         cfg_layout.addWidget(notice_lbl, 0, 0, 1, 4)
 
         # Duration
@@ -430,7 +575,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(cfg_box)
 
         # 2. Controls & Status Card Row
-        ctrl_layout = QHBoxLayout()
+        ctrl_card = QFrame()
+        ctrl_card.setObjectName("cardFrame")
+        ctrl_layout = QHBoxLayout(ctrl_card)
+        ctrl_layout.setContentsMargins(14, 10, 14, 10)
+        ctrl_layout.setSpacing(10)
 
         self.btn_hunter_start = QPushButton("▶️ Start Continuous Hunter")
         self.btn_hunter_start.setObjectName("primaryBtn")
@@ -456,18 +605,19 @@ class MainWindow(QMainWindow):
         ctrl_layout.addStretch()
 
         self.lbl_hunter_status = QLabel("Status: IDLE")
-        self.lbl_hunter_status.setStyleSheet("font-weight: bold; color: #8b949e; font-size: 14px;")
+        self.lbl_hunter_status.setStyleSheet(f"font-weight: bold; color: {COLOR_TEXT_SECONDARY}; font-size: 14px;")
         ctrl_layout.addWidget(self.lbl_hunter_status)
 
-        layout.addLayout(ctrl_layout)
+        layout.addWidget(ctrl_card)
 
         # 3. Live Metrics Cards
         m_row = QHBoxLayout()
-        self.hm_elapsed = self._create_stat_card("Elapsed Time", "00:00:00", "#58a6ff")
-        self.hm_cycles = self._create_stat_card("Cycles Completed", "0", "#3fb950")
-        self.hm_examined = self._create_stat_card("Protocols Evaluated", "0", "#8b949e")
-        self.hm_added = self._create_stat_card("New Candidates Added", "0", "#d29922")
-        self.hm_errors = self._create_stat_card("Recent Errors", "0", "#f85149")
+        m_row.setSpacing(10)
+        self.hm_elapsed = StatCardWidget("Elapsed Time", "00:00:00", COLOR_CYAN_ACCENT, "Session duration")
+        self.hm_cycles = StatCardWidget("Cycles Completed", "0", COLOR_SUCCESS, "Full scans")
+        self.hm_examined = StatCardWidget("Protocols Evaluated", "0", COLOR_NEUTRAL, "Total checked")
+        self.hm_added = StatCardWidget("New Candidates Added", "0", COLOR_WARNING, "Unique discoveries")
+        self.hm_errors = StatCardWidget("Recent Errors", "0", COLOR_DANGER, "Transient errors")
 
         m_row.addWidget(self.hm_elapsed)
         m_row.addWidget(self.hm_cycles)
@@ -479,31 +629,42 @@ class MainWindow(QMainWindow):
         # 4. Activity Log Console
         log_box = QGroupBox("Protocol Hunter Live Activity Log")
         log_layout = QVBoxLayout(log_box)
-        log_layout.setContentsMargins(8, 10, 8, 8)
+        log_layout.setContentsMargins(10, 12, 10, 10)
 
         self.hunter_log_console = QPlainTextEdit()
         self.hunter_log_console.setReadOnly(True)
         self.hunter_log_console.setMaximumBlockCount(2000)
+        self.hunter_log_console.setStyleSheet(f"""
+            QPlainTextEdit {{
+                background-color: {COLOR_BG_MAIN};
+                border: 1px solid {COLOR_BORDER};
+                border-radius: 6px;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 11px;
+                color: #e2e8f0;
+            }}
+        """)
         log_layout.addWidget(self.hunter_log_console)
 
         layout.addWidget(log_box)
 
     # -------------------------------------------------------------------------
-    # TAB 3: REPORTS & EXPORTS
+    # TAB 3: REPORTS & HISTORY
     # -------------------------------------------------------------------------
     def _setup_reports_tab(self):
         layout = QVBoxLayout(self.reports_tab)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
-        # Controls
+        # Controls Toolbar
         btn_bar = QHBoxLayout()
+        btn_bar.setSpacing(8)
 
         btn_export_db = QPushButton("💾 Export Discovery Database (JSON)")
         btn_export_db.clicked.connect(self._on_export_database)
         btn_bar.addWidget(btn_export_db)
 
-        btn_export_filtered = QPushButton("📤 Export Active Filtered Candidates (JSON)")
+        btn_export_filtered = QPushButton("📤 Export Filtered Candidates (JSON)")
         btn_export_filtered.clicked.connect(self._on_export_filtered_records)
         btn_bar.addWidget(btn_export_filtered)
 
@@ -542,11 +703,30 @@ class MainWindow(QMainWindow):
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.addWidget(QLabel("Report Contents (Redacted Secrets):"))
+        right_layout.setSpacing(6)
+
+        preview_header = QHBoxLayout()
+        preview_header.addWidget(QLabel("Report Contents (Redacted Secrets):"))
+        preview_header.addStretch()
+
+        btn_copy_json = QPushButton("📋 Copy JSON")
+        btn_copy_json.clicked.connect(self._on_copy_report_json)
+        preview_header.addWidget(btn_copy_json)
+        right_layout.addLayout(preview_header)
 
         self.report_preview = QTextEdit()
         self.report_preview.setReadOnly(True)
         self.report_preview.setPlaceholderText("Select a report file from the left to view contents...")
+        self.report_preview.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {COLOR_BG_MAIN};
+                border: 1px solid {COLOR_BORDER};
+                border-radius: 6px;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 11px;
+                color: #e2e8f0;
+            }}
+        """)
         right_layout.addWidget(self.report_preview)
 
         splitter.addWidget(right_widget)
@@ -556,29 +736,154 @@ class MainWindow(QMainWindow):
         self._refresh_reports_list()
 
     # -------------------------------------------------------------------------
-    # ENVIRONMENT & DIAGNOSTIC DIALOGS
+    # TAB 4: SETTINGS & DIAGNOSTICS
+    # -------------------------------------------------------------------------
+    def _setup_settings_tab(self):
+        layout = QVBoxLayout(self.settings_tab)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(14)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+
+        scroll_content = QWidget()
+        s_layout = QVBoxLayout(scroll_content)
+        s_layout.setSpacing(14)
+
+        # 1. CertiK API Key Section
+        certik_box = QGroupBox("CertiK Skynet Partner API Configuration")
+        c_layout = QGridLayout(certik_box)
+        c_layout.setContentsMargins(14, 14, 14, 14)
+        c_layout.setSpacing(10)
+
+        c_layout.addWidget(QLabel("CertiK API Key:"), 0, 0)
+        self.setting_certik_key = PasswordLineEdit(placeholder="Enter commercial partner API key...")
+        self.setting_certik_key.setText(os.getenv("CERTIK_API_KEY", ""))
+        c_layout.addWidget(self.setting_certik_key, 0, 1)
+
+        btn_test_certik = QPushButton("🧪 Test CertiK Connection")
+        btn_test_certik.clicked.connect(self._on_test_certik_settings)
+        c_layout.addWidget(btn_test_certik, 0, 2)
+
+        c_note = QLabel("Note: When missing, security intelligence is transparently reported as NOT_CONFIGURED.")
+        c_note.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px;")
+        c_layout.addWidget(c_note, 1, 0, 1, 3)
+        s_layout.addWidget(certik_box)
+
+        # 2. Explorer API Keys Section
+        explorer_box = QGroupBox("EVM Explorer API Keys (for Heuristic Permission Scanning)")
+        e_layout = QGridLayout(explorer_box)
+        e_layout.setContentsMargins(14, 14, 14, 14)
+        e_layout.setSpacing(10)
+
+        e_layout.addWidget(QLabel("Etherscan API Key:"), 0, 0)
+        self.setting_eth_key = PasswordLineEdit(placeholder="Etherscan key...")
+        self.setting_eth_key.setText(os.getenv("ETHERSCAN_API_KEY", ""))
+        e_layout.addWidget(self.setting_eth_key, 0, 1)
+
+        e_layout.addWidget(QLabel("Arbiscan API Key:"), 1, 0)
+        self.setting_arb_key = PasswordLineEdit(placeholder="Arbiscan key...")
+        self.setting_arb_key.setText(os.getenv("ARBISCAN_API_KEY", ""))
+        e_layout.addWidget(self.setting_arb_key, 1, 1)
+
+        e_layout.addWidget(QLabel("Polygonscan API Key:"), 2, 0)
+        self.setting_poly_key = PasswordLineEdit(placeholder="Polygonscan key...")
+        self.setting_poly_key.setText(os.getenv("POLYGONSCAN_API_KEY", ""))
+        e_layout.addWidget(self.setting_poly_key, 2, 1)
+
+        e_layout.addWidget(QLabel("BscScan API Key:"), 3, 0)
+        self.setting_bsc_key = PasswordLineEdit(placeholder="BscScan key...")
+        self.setting_bsc_key.setText(os.getenv("BSCSCAN_API_KEY", ""))
+        e_layout.addWidget(self.setting_bsc_key, 3, 1)
+
+        s_layout.addWidget(explorer_box)
+
+        # 3. Slither Static Analysis Section
+        slither_box = QGroupBox("Slither Static Analysis Backend Configuration")
+        sl_layout = QGridLayout(slither_box)
+        sl_layout.setContentsMargins(14, 14, 14, 14)
+        sl_layout.setSpacing(10)
+
+        sl_layout.addWidget(QLabel("Execution Backend:"), 0, 0)
+        self.setting_slither_backend = QComboBox()
+        self.setting_slither_backend.addItems(["auto", "docker", "native"])
+        curr_b = os.getenv("SLITHER_BACKEND", "auto").lower()
+        idx = self.setting_slither_backend.findText(curr_b)
+        self.setting_slither_backend.setCurrentIndex(idx if idx >= 0 else 0)
+        sl_layout.addWidget(self.setting_slither_backend, 0, 1)
+
+        sl_layout.addWidget(QLabel("Docker Image Tag:"), 1, 0)
+        self.setting_docker_image = QLineEdit(os.getenv("SLITHER_DOCKER_IMAGE", "defi-slither:0.10.4"))
+        sl_layout.addWidget(self.setting_docker_image, 1, 1)
+
+        btn_check_slither = QPushButton("🧪 Check Slither & Docker Availability")
+        btn_check_slither.clicked.connect(self._show_docker_status_dialog)
+        sl_layout.addWidget(btn_check_slither, 2, 1)
+
+        s_layout.addWidget(slither_box)
+
+        # 4. Storage & Persistence Info
+        storage_box = QGroupBox("Persistence & Environment Diagnostics")
+        st_layout = QGridLayout(storage_box)
+        st_layout.setContentsMargins(14, 14, 14, 14)
+        st_layout.setSpacing(8)
+
+        st_layout.addWidget(QLabel("Data Directory:"), 0, 0)
+        lbl_dir = QLabel(str(self.data_dir))
+        lbl_dir.setStyleSheet(f"color: {COLOR_CYAN_ACCENT}; font-family: monospace;")
+        st_layout.addWidget(lbl_dir, 0, 1)
+
+        st_layout.addWidget(QLabel("Schema Version:"), 1, 0)
+        lbl_ver = QLabel(CURRENT_SCHEMA_VERSION)
+        lbl_ver.setStyleSheet("color: #e2e8f0; font-family: monospace;")
+        st_layout.addWidget(lbl_ver, 1, 1)
+
+        s_layout.addWidget(storage_box)
+
+        # 5. Save Button Row
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        self.lbl_settings_msg = QLabel("")
+        self.lbl_settings_msg.setStyleSheet(f"color: {COLOR_SUCCESS}; font-weight: bold;")
+        btn_row.addWidget(self.lbl_settings_msg)
+
+        btn_save = QPushButton("💾 Save & Apply Settings")
+        btn_save.setObjectName("primaryBtn")
+        btn_save.clicked.connect(self._on_save_settings_tab)
+        btn_row.addWidget(btn_save)
+
+        s_layout.addLayout(btn_row)
+        s_layout.addStretch()
+
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll)
+
+    # -------------------------------------------------------------------------
+    # ENVIRONMENT & DIAGNOSTICS LOGIC
     # -------------------------------------------------------------------------
     def _check_environment_status(self):
         # 1. Docker check
         docker_ok, img_ok, docker_msg = check_docker_availability()
         if docker_ok and img_ok:
             self.docker_pill.setText("Docker: Ready")
-            self.docker_pill.setStyleSheet("background-color: #238636; color: #fff;")
+            self.docker_pill.setStyleSheet("background-color: #065f46; color: #6ee7b7; border: 1px solid #059669;")
         elif docker_ok:
             self.docker_pill.setText("Docker: Image Missing")
-            self.docker_pill.setStyleSheet("background-color: #d29922; color: #fff;")
+            self.docker_pill.setStyleSheet("background-color: #78350f; color: #fde68a; border: 1px solid #d97706;")
         else:
             self.docker_pill.setText("Docker: Unavailable")
-            self.docker_pill.setStyleSheet("background-color: #da3633; color: #fff;")
+            self.docker_pill.setStyleSheet("background-color: #7f1d1d; color: #fca5a5; border: 1px solid #dc2626;")
 
         # 2. CertiK check
         certik_key = os.getenv("CERTIK_API_KEY", "").strip()
         if certik_key:
             self.certik_pill.setText("CertiK: Key Configured")
-            self.certik_pill.setStyleSheet("background-color: #238636; color: #fff;")
+            self.certik_pill.setStyleSheet("background-color: #065f46; color: #6ee7b7; border: 1px solid #059669;")
         else:
             self.certik_pill.setText("CertiK: Key Missing")
-            self.certik_pill.setStyleSheet("background-color: #30363d; color: #8b949e;")
+            self.certik_pill.setStyleSheet("background-color: #1e293b; color: #94a3b8; border: 1px solid #334155;")
 
     def _show_docker_status_dialog(self):
         docker_ok, img_ok, docker_msg = check_docker_availability()
@@ -612,7 +917,7 @@ class MainWindow(QMainWindow):
             "<p><b>Guidance:</b></p>"
             "<ul>"
             "<li>Commercial CertiK security intelligence requires a partner API key.</li>"
-            "<li>Configure <code>CERTIK_API_KEY</code> in your <code>.env</code> file, environment variables, or via the <b>⚙️ Settings & API Keys</b> dialog.</li>"
+            "<li>Configure <code>CERTIK_API_KEY</code> via the <b>Settings & Diagnostics</b> tab.</li>"
             "<li>When missing, the pipeline marks security intelligence as <code>NOT_CONFIGURED</code> cleanly "
             "without interrupting protocol discovery or repository resolution.</li>"
             "</ul>"
@@ -620,138 +925,43 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "CertiK Skynet API Status", msg)
 
     def _show_settings_dialog(self):
-        """Displays secure settings dialog for configuring API keys and execution preferences."""
-        from defi_research.config import save_env_values
-        from defi_research.security_intelligence import check_live_api_connectivity
+        """Switches to the Settings & Diagnostics tab directly."""
+        self.tabs.setCurrentIndex(4)
 
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Application Configuration & API Keys")
-        dialog.resize(580, 520)
-        d_layout = QVBoxLayout(dialog)
-        d_layout.setSpacing(12)
-
-        # 1. CertiK Group
-        certik_box = QGroupBox("CertiK Skynet Partner API Configuration")
-        c_layout = QGridLayout(certik_box)
-
-        c_layout.addWidget(QLabel("CertiK API Key:"), 0, 0)
-        key_input = QLineEdit(os.getenv("CERTIK_API_KEY", ""))
-        key_input.setEchoMode(QLineEdit.Password)
-        c_layout.addWidget(key_input, 0, 1)
-
-        btn_toggle_key = QPushButton("👁️")
-        btn_toggle_key.setFixedWidth(36)
-        def _toggle_echo():
-            if key_input.echoMode() == QLineEdit.Password:
-                key_input.setEchoMode(QLineEdit.Normal)
+    def _on_test_certik_settings(self):
+        test_key = self.setting_certik_key.text().strip()
+        if not test_key:
+            QMessageBox.warning(self, "Missing Key", "Please enter a CertiK API key before testing connection.")
+            return
+        old_key = os.environ.get("CERTIK_API_KEY")
+        os.environ["CERTIK_API_KEY"] = test_key
+        try:
+            ok, diag = check_live_api_connectivity()
+            if ok:
+                QMessageBox.information(self, "CertiK Live Check", f"✅ Connection successful!\n{diag}")
             else:
-                key_input.setEchoMode(QLineEdit.Password)
-        btn_toggle_key.clicked.connect(_toggle_echo)
-        c_layout.addWidget(btn_toggle_key, 0, 2)
+                QMessageBox.warning(self, "CertiK Live Check", f"⚠️ Connection test returned: {diag}")
+        finally:
+            if old_key is not None:
+                os.environ["CERTIK_API_KEY"] = old_key
+            else:
+                os.environ.pop("CERTIK_API_KEY", None)
 
-        btn_test_certik = QPushButton("🧪 Test CertiK Connection")
-        def _test_certik():
-            test_key = key_input.text().strip()
-            if not test_key:
-                QMessageBox.warning(dialog, "Missing Key", "Please enter a CertiK API key before testing connection.")
-                return
-            old_key = os.environ.get("CERTIK_API_KEY")
-            os.environ["CERTIK_API_KEY"] = test_key
-            try:
-                ok, diag = check_live_api_connectivity()
-                if ok:
-                    QMessageBox.information(dialog, "CertiK Live Check", f"✅ Connection successful!\n{diag}")
-                else:
-                    QMessageBox.warning(dialog, "CertiK Live Check", f"⚠️ Connection test returned: {diag}")
-            finally:
-                if old_key is not None:
-                    os.environ["CERTIK_API_KEY"] = old_key
-                else:
-                    os.environ.pop("CERTIK_API_KEY", None)
-
-        btn_test_certik.clicked.connect(_test_certik)
-        c_layout.addWidget(btn_test_certik, 1, 1, 1, 2)
-
-        d_layout.addWidget(certik_box)
-
-        # 2. Explorer API Keys Group
-        explorer_box = QGroupBox("Explorer API Keys (for Heuristic On-Chain Permission Scanner)")
-        e_layout = QGridLayout(explorer_box)
-
-        e_layout.addWidget(QLabel("Etherscan API Key:"), 0, 0)
-        eth_key_in = QLineEdit(os.getenv("ETHERSCAN_API_KEY", ""))
-        eth_key_in.setEchoMode(QLineEdit.Password)
-        e_layout.addWidget(eth_key_in, 0, 1)
-
-        e_layout.addWidget(QLabel("Arbiscan API Key:"), 1, 0)
-        arb_key_in = QLineEdit(os.getenv("ARBISCAN_API_KEY", ""))
-        arb_key_in.setEchoMode(QLineEdit.Password)
-        e_layout.addWidget(arb_key_in, 1, 1)
-
-        e_layout.addWidget(QLabel("Polygonscan API Key:"), 2, 0)
-        poly_key_in = QLineEdit(os.getenv("POLYGONSCAN_API_KEY", ""))
-        poly_key_in.setEchoMode(QLineEdit.Password)
-        e_layout.addWidget(poly_key_in, 2, 1)
-
-        e_layout.addWidget(QLabel("BscScan API Key:"), 3, 0)
-        bsc_key_in = QLineEdit(os.getenv("BSCSCAN_API_KEY", ""))
-        bsc_key_in.setEchoMode(QLineEdit.Password)
-        e_layout.addWidget(bsc_key_in, 3, 1)
-
-        d_layout.addWidget(explorer_box)
-
-        # 3. Slither Settings Group
-        slither_box = QGroupBox("Slither Static Analysis Configuration")
-        s_layout = QGridLayout(slither_box)
-
-        s_layout.addWidget(QLabel("Execution Backend:"), 0, 0)
-        backend_combo = QComboBox()
-        backend_combo.addItems(["auto", "docker", "native"])
-        curr_b = os.getenv("SLITHER_BACKEND", "auto").lower()
-        idx = backend_combo.findText(curr_b)
-        backend_combo.setCurrentIndex(idx if idx >= 0 else 0)
-        s_layout.addWidget(backend_combo, 0, 1)
-
-        s_layout.addWidget(QLabel("Docker Image Tag:"), 1, 0)
-        image_in = QLineEdit(os.getenv("SLITHER_DOCKER_IMAGE", "defi-slither:0.10.4"))
-        s_layout.addWidget(image_in, 1, 1)
-
-        btn_check_slither = QPushButton("🧪 Check Slither & Docker")
-        btn_check_slither.clicked.connect(self._show_docker_status_dialog)
-        s_layout.addWidget(btn_check_slither, 2, 1)
-
-        d_layout.addWidget(slither_box)
-
-        # 4. Save and Cancel Buttons
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-
-        btn_cancel = QPushButton("Cancel")
-        btn_cancel.clicked.connect(dialog.reject)
-        btn_row.addWidget(btn_cancel)
-
-        btn_save = QPushButton("💾 Save & Apply")
-        btn_save.setObjectName("primaryBtn")
-        def _save_settings():
-            to_save = {
-                "CERTIK_API_KEY": key_input.text().strip(),
-                "ETHERSCAN_API_KEY": eth_key_in.text().strip(),
-                "ARBISCAN_API_KEY": arb_key_in.text().strip(),
-                "POLYGONSCAN_API_KEY": poly_key_in.text().strip(),
-                "BSCSCAN_API_KEY": bsc_key_in.text().strip(),
-                "SLITHER_BACKEND": backend_combo.currentText(),
-                "SLITHER_DOCKER_IMAGE": image_in.text().strip(),
-            }
-            save_env_values(to_save)
-            self._check_environment_status()
-            QMessageBox.information(dialog, "Settings Saved", "Configuration saved and applied successfully.")
-            dialog.accept()
-
-        btn_save.clicked.connect(_save_settings)
-        btn_row.addWidget(btn_save)
-
-        d_layout.addLayout(btn_row)
-        dialog.exec()
+    def _on_save_settings_tab(self):
+        to_save = {
+            "CERTIK_API_KEY": self.setting_certik_key.text().strip(),
+            "ETHERSCAN_API_KEY": self.setting_eth_key.text().strip(),
+            "ARBISCAN_API_KEY": self.setting_arb_key.text().strip(),
+            "POLYGONSCAN_API_KEY": self.setting_poly_key.text().strip(),
+            "BSCSCAN_API_KEY": self.setting_bsc_key.text().strip(),
+            "SLITHER_BACKEND": self.setting_slither_backend.currentText(),
+            "SLITHER_DOCKER_IMAGE": self.setting_docker_image.text().strip(),
+        }
+        save_env_values(to_save)
+        self._check_environment_status()
+        self.lbl_settings_msg.setText("✓ Settings saved and applied successfully!")
+        QTimer.singleShot(4000, lambda: self.lbl_settings_msg.setText(""))
+        QMessageBox.information(self, "Settings Saved", "Configuration saved to environment and .env file.")
 
     # -------------------------------------------------------------------------
     # TABLE & DETAIL SYNCHRONIZATION
@@ -773,6 +983,13 @@ class MainWindow(QMainWindow):
     def _on_filter_changed(self):
         self._refresh_table_and_dashboard()
 
+    def _on_reset_filters(self):
+        self.search_input.setText("")
+        self.tvl_combo.setCurrentIndex(1)  # $50,000
+        self.chain_combo.setCurrentIndex(0)  # All
+        self.cat_combo.setCurrentIndex(0)  # All
+        self._refresh_table_and_dashboard()
+
     def _refresh_table_and_dashboard(self):
         min_tvl = self._get_active_min_tvl()
         chain = self.chain_combo.currentText()
@@ -787,7 +1004,7 @@ class MainWindow(QMainWindow):
         )
         self._active_filtered_records = records
 
-        # Update stats
+        # 1. Update stats cards
         all_records = self.store.get_all_records()
         self.stat_total.findChild(QLabel, "valueLabel").setText(str(len(all_records)))
         self.stat_matched.findChild(QLabel, "valueLabel").setText(str(len(records)))
@@ -811,13 +1028,24 @@ class MainWindow(QMainWindow):
         if last_cy:
             try:
                 dt = datetime.fromisoformat(last_cy)
-                self.stat_last_cycle.findChild(QLabel, "valueLabel").setText(dt.strftime("%H:%M:%S"))
+                self.stat_last_cycle.findChild(QLabel, "valueLabel").setText(dt.strftime("%H:%M:%S UTC"))
             except Exception:
                 self.stat_last_cycle.findChild(QLabel, "valueLabel").setText(str(last_cy)[:19])
         else:
             self.stat_last_cycle.findChild(QLabel, "valueLabel").setText("Never")
 
-        # Repopulate table
+        # 2. Update Dashboard Recent Discoveries & Activity Tables
+        self._update_dashboard_recent_tables(all_records)
+
+        # 3. Update Explorer Candidate Table & Empty State
+        if not records:
+            self.table.setRowCount(0)
+            self.table_stack.setCurrentIndex(1)  # Empty State
+            self.lbl_proto_title.setText("No protocol selected")
+            self.detail_text.setHtml("<p style='color: #64748b; padding: 12px;'>No matching protocol selected.</p>")
+            return
+
+        self.table_stack.setCurrentIndex(0)  # Active Table
         self.table.setRowCount(len(records))
         for row_idx, r in enumerate(records):
             # Name
@@ -854,6 +1082,62 @@ class MainWindow(QMainWindow):
 
         if records and self._selected_record is None:
             self.table.selectRow(0)
+
+    def _update_dashboard_recent_tables(self, all_records: List[DiscoveredProtocolRecord]):
+        # Sort by updated descending
+        sorted_records = sorted(
+            all_records,
+            key=lambda r: r.last_updated_at or r.first_discovered_at or "",
+            reverse=True,
+        )
+
+        # 1. Recent Discoveries (top 8)
+        top_disc = sorted_records[:8]
+        self.table_recent_disc.setRowCount(len(top_disc))
+        for idx, r in enumerate(top_disc):
+            self.table_recent_disc.setItem(idx, 0, QTableWidgetItem(r.name))
+            self.table_recent_disc.setItem(idx, 1, QTableWidgetItem((r.chain or "unknown").upper()))
+            tvl_str = f"${r.tvl:,.0f}" if r.tvl is not None else "N/A"
+            self.table_recent_disc.setItem(idx, 2, QTableWidgetItem(tvl_str))
+            upd_str = r.last_updated_at[:10] if r.last_updated_at else "N/A"
+            self.table_recent_disc.setItem(idx, 3, QTableWidgetItem(upd_str))
+
+        # 2. Recent Analysis Activity (top 8 with analysis status)
+        analysis_records = [
+            r for r in sorted_records
+            if r.static_analysis_status or r.security_intelligence_status or r.repository_resolution_status
+        ][:8]
+        self.table_recent_analysis.setRowCount(len(analysis_records))
+        for idx, r in enumerate(analysis_records):
+            self.table_recent_analysis.setItem(idx, 0, QTableWidgetItem(r.name))
+            self.table_recent_analysis.setItem(idx, 1, QTableWidgetItem(r.static_analysis_status or "PENDING"))
+            tier_str = r.security_score_grade or (f"{r.security_score:.0f}" if r.security_score else "N/A")
+            self.table_recent_analysis.setItem(idx, 2, QTableWidgetItem(tier_str))
+            self.table_recent_analysis.setItem(idx, 3, QTableWidgetItem(r.repository_resolution_status or "UNRESOLVED"))
+
+    def _on_recent_discovery_double_clicked(self, item: QTableWidgetItem):
+        row = item.row()
+        all_records = sorted(
+            self.store.get_all_records(),
+            key=lambda r: r.last_updated_at or r.first_discovered_at or "",
+            reverse=True,
+        )
+        if 0 <= row < len(all_records):
+            record = all_records[row]
+            self.tabs.setCurrentIndex(1)  # Explorer tab
+            self.search_input.setText(record.name)
+
+    def _on_recent_analysis_double_clicked(self, item: QTableWidgetItem):
+        row = item.row()
+        all_records = sorted(
+            [r for r in self.store.get_all_records() if r.static_analysis_status or r.security_intelligence_status],
+            key=lambda r: r.last_updated_at or r.first_discovered_at or "",
+            reverse=True,
+        )
+        if 0 <= row < len(all_records):
+            record = all_records[row]
+            self.tabs.setCurrentIndex(1)  # Explorer tab
+            self.search_input.setText(record.name)
 
     def _on_table_selection_changed(self):
         sel = self.table.selectedItems()
@@ -935,7 +1219,7 @@ class MainWindow(QMainWindow):
 <b>Findings Count:</b> {sli_findings}<br>
 <b>Severity Breakdown:</b> {sli_breakdown}<br>
 <b>Diagnostics / Reason:</b> {sli_diag}<br>
-<small style="color: #8b949e;">* Note: An UNAVAILABLE or SKIPPED scan is never presented as zero findings.</small>
+<small style="color: #94a3b8;">* Note: An UNAVAILABLE or SKIPPED scan is never presented as zero findings.</small>
 <hr>
 
 <h3>🛡️ CertiK Security Intelligence</h3>
@@ -948,7 +1232,7 @@ class MainWindow(QMainWindow):
 <h3>⚡ On-Chain Permission Scanner [HEURISTIC]</h3>
 <b>Status:</b> {r.permission_scanner_status or 'NOT_SCANNED'}<br>
 <b>Critical Signals:</b> {perm_crit}{perm_findings_html}<br>
-<small style="color: #8b949e;">* Explorer ABI regex search is heuristic and requires Foundry simulation confirmation.</small>
+<small style="color: #94a3b8;">* Explorer ABI regex search is heuristic and requires Foundry simulation confirmation.</small>
 <hr>
 
 <h3>⚠️ Analytical Limitations</h3>
@@ -969,6 +1253,14 @@ class MainWindow(QMainWindow):
                 "No Repository URL",
                 "Selected protocol does not have a resolved repository URL.",
             )
+
+    def _on_copy_selected_address(self):
+        if self._selected_record and self._selected_record.address:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(self._selected_record.address)
+            QMessageBox.information(self, "Address Copied", f"Copied EVM Address:\n{self._selected_record.address}")
+        else:
+            QMessageBox.information(self, "No Address", "Selected protocol does not have an EVM address recorded.")
 
     def _on_run_deep_analysis_selected(self):
         if not self._selected_record:
@@ -1047,7 +1339,6 @@ class MainWindow(QMainWindow):
         self.btn_quick_fetch.setEnabled(False)
         self.btn_quick_fetch.setText("🔄 Running Cycle...")
 
-        # Run one discovery cycle in HunterWorker with 1 cycle
         cfg = HunterConfig(
             duration_hours=0.001,  # immediate 1-cycle
             cycle_interval_seconds=1,
@@ -1094,7 +1385,7 @@ class MainWindow(QMainWindow):
         self.btn_hunter_stop.setEnabled(True)
 
         self.lbl_hunter_status.setText("Status: RUNNING")
-        self.lbl_hunter_status.setStyleSheet("font-weight: bold; color: #3fb950; font-size: 14px;")
+        self.lbl_hunter_status.setStyleSheet(f"font-weight: bold; color: {COLOR_SUCCESS}; font-size: 14px;")
 
         self.hunter_worker.start()
 
@@ -1104,7 +1395,7 @@ class MainWindow(QMainWindow):
             self.btn_hunter_pause.setEnabled(False)
             self.btn_hunter_resume.setEnabled(True)
             self.lbl_hunter_status.setText("Status: PAUSED")
-            self.lbl_hunter_status.setStyleSheet("font-weight: bold; color: #d29922; font-size: 14px;")
+            self.lbl_hunter_status.setStyleSheet(f"font-weight: bold; color: {COLOR_WARNING}; font-size: 14px;")
 
     def _on_resume_hunter(self):
         if self.hunter_worker:
@@ -1112,13 +1403,13 @@ class MainWindow(QMainWindow):
             self.btn_hunter_pause.setEnabled(True)
             self.btn_hunter_resume.setEnabled(False)
             self.lbl_hunter_status.setText("Status: RUNNING")
-            self.lbl_hunter_status.setStyleSheet("font-weight: bold; color: #3fb950; font-size: 14px;")
+            self.lbl_hunter_status.setStyleSheet(f"font-weight: bold; color: {COLOR_SUCCESS}; font-size: 14px;")
 
     def _on_stop_hunter(self):
         if self.hunter_worker:
             self.hunter_worker.request_stop()
             self.lbl_hunter_status.setText("Status: STOPPING...")
-            self.lbl_hunter_status.setStyleSheet("font-weight: bold; color: #f85149; font-size: 14px;")
+            self.lbl_hunter_status.setStyleSheet(f"font-weight: bold; color: {COLOR_DANGER}; font-size: 14px;")
 
     def _on_hunter_state_changed(self, state_str: str):
         if state_str in ("IDLE", "COMPLETED", "FAILED"):
@@ -1127,9 +1418,9 @@ class MainWindow(QMainWindow):
             self.btn_hunter_resume.setEnabled(False)
             self.btn_hunter_stop.setEnabled(False)
             self.btn_quick_fetch.setEnabled(True)
-            self.btn_quick_fetch.setText("🔄 Run Discovery Cycle")
+            self.btn_quick_fetch.setText("🔄 Run Cycle")
 
-            color = "#3fb950" if state_str == "COMPLETED" else ("#f85149" if state_str == "FAILED" else "#8b949e")
+            color = COLOR_SUCCESS if state_str == "COMPLETED" else (COLOR_DANGER if state_str == "FAILED" else COLOR_TEXT_SECONDARY)
             self.lbl_hunter_status.setText(f"Status: {state_str}")
             self.lbl_hunter_status.setStyleSheet(f"font-weight: bold; color: {color}; font-size: 14px;")
 
@@ -1157,7 +1448,7 @@ class MainWindow(QMainWindow):
         self.hunter_log_console.appendPlainText(f"[ERROR] {err}")
 
     def _on_ui_tick(self):
-        # Keeps status pills current
+        # Keeps status pills and timer current
         pass
 
     # -------------------------------------------------------------------------
@@ -1183,7 +1474,6 @@ class MainWindow(QMainWindow):
         for row_idx, fpath in enumerate(found_files):
             self.reports_table.setItem(row_idx, 0, QTableWidgetItem(fpath.name))
 
-            # Try to read protocol name
             proto_name = "Unknown"
             ts_str = datetime.fromtimestamp(fpath.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
             try:
@@ -1221,6 +1511,13 @@ class MainWindow(QMainWindow):
                 self.report_preview.setPlainText(content)
             except Exception as e:
                 self.report_preview.setPlainText(f"Error reading report: {e}")
+
+    def _on_copy_report_json(self):
+        text = self.report_preview.toPlainText()
+        if text:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(text)
+            QMessageBox.information(self, "JSON Copied", "Report contents copied to clipboard.")
 
     def _on_export_database(self):
         dest, _ = QFileDialog.getSaveFileName(

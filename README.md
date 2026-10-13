@@ -364,12 +364,19 @@ The Phase 4 orchestrator generates standardized JSON reports:
 
 ## Running Automated Tests & Continuous Integration (CI)
 
-### 6. Windows Desktop Application & Protocol Hunter (Phase 8)
+### 6. Professional Desktop Intelligence Workstation (Phase 10 Redesign)
 
-The project includes a PySide6 dark-themed research dashboard with continuous protocol discovery:
+The project includes an enterprise-grade PySide6 dark-navy & cyan desktop workstation designed for long-running DeFi research and security intelligence sessions:
+
+- **5-View Navigation Shell**:
+  1. `📊 Dashboard`: Real-time telemetry, stored records breakdown, recent discoveries, and dependency status (Docker, Slither, CertiK).
+  2. `🔍 Protocol Explorer`: Interactive candidate filtering, table with tooltips, empty states, and comprehensive Protocol Inspector evidence breakdown.
+  3. `🎯 Protocol Hunter`: Dedicated continuous discovery workspace, cycle controls (Start, Pause, Resume, Stop), live elapsed metrics, and streaming event log.
+  4. `📄 Reports & History`: Generated pipeline reports list, syntax-formatted previewer, clipboard export, and JSON exports.
+  5. `⚙️ Settings & Diagnostics`: Secure API credentials with password show/hide masking toggles, Slither backend configuration, and live CertiK connection validation.
 
 ```bash
-# Launch the desktop application from source:
+# Launch the desktop workstation from source:
 python desktop_app.py
 # Or via CLI subcommand:
 python cli.py gui
@@ -388,7 +395,7 @@ python packaging/build_exe.py
 All tests are 100% deterministic, offline by default, and require no live network connections, external tools, or secrets:
 
 ```bash
-# Run the complete test suite (192 tests total):
+# Run the complete test suite (194 tests total, 193 passed, 1 skipped):
 python -m unittest discover -s tests -v
 
 # Run individual test modules:
