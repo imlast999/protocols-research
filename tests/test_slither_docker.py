@@ -174,16 +174,23 @@ class TestSlitherDockerBackend(unittest.TestCase):
         args = build_docker_run_args(
             target_dir=self.repo_dir,
             host_output_dir=self.workspace_dir,
-            image_name="defi-slither:0.10.2",
+            image_name="defi-slither:0.10.4",
         )
         self.assertEqual(args[0], "docker")
         self.assertEqual(args[1], "run")
         self.assertIn("--rm", args)
         self.assertIn("-w", args)
         self.assertEqual(args[args.index("-w") + 1], "/repo")
-        self.assertIn("defi-slither:0.10.2", args)
+        self.assertIn("defi-slither:0.10.4", args)
         self.assertIn("slither", args)
         self.assertIn("--json", args)
+
+        # Test default fallback when image_name is omitted
+        args_default = build_docker_run_args(
+            target_dir=self.repo_dir,
+            host_output_dir=self.workspace_dir,
+        )
+        self.assertIn("defi-slither:0.10.4", args_default)
 
     # 5. Read-only target mount
     def test_05_read_only_target_mount(self):
@@ -191,7 +198,7 @@ class TestSlitherDockerBackend(unittest.TestCase):
         args = build_docker_run_args(
             target_dir=self.repo_dir,
             host_output_dir=self.workspace_dir,
-            image_name="defi-slither:0.10.2",
+            image_name="defi-slither:0.10.4",
         )
         real_target = os.path.realpath(os.path.abspath(self.repo_dir))
         expected_ro_mount = f"{real_target}:/repo:ro"
@@ -208,7 +215,7 @@ class TestSlitherDockerBackend(unittest.TestCase):
         args = build_docker_run_args(
             target_dir=self.repo_dir,
             host_output_dir=self.workspace_dir,
-            image_name="defi-slither:0.10.2",
+            image_name="defi-slither:0.10.4",
         )
         self.assertIn("--network", args)
         self.assertEqual(args[args.index("--network") + 1], "none")

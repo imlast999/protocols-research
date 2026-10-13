@@ -412,6 +412,96 @@ class TestPipelineOrchestrator(unittest.TestCase):
         self.assertEqual(summary.total_protocols, 1)
         self.assertEqual(summary.reports[0]["protocol_name"], "P1")
 
+    # 14. Stage 4 unhandled exception does not crash the pipeline and isolates failures
+    @patch("defi_research.pipeline.verify_repository_source")
+    @patch("defi_research.pipeline.check_slither_availability", return_value=(True, "0.10.4", None))
+    @patch("defi_research.pipeline.run_slither_analysis")
+    @patch("defi_research.pipeline.query_protocol_security_intelligence")
+    def test_slither_unexpected_exception_isolated(
+        self, mock_intel, mock_slither, mock_avail, mock_verify
+    ):
+        """Unexpected exception in Slither stage must be caught and marked FAILED without aborting later stages."""
+        mock_verify.return_value = SourceVerificationRecord(
+            status=SourceVerificationStatus.SOURCE_VERIFIED,
+            repo_path=self.repo_dir,
+            build_framework="foundry",
+            commit_hash="abcdef1234567890abcdef1234567890abcdef12",
+        )
+        mock_slither.side_effect = RuntimeError("Low-level OS failure: pipe broken")
+        mock_intel.return_value = make_intel_result(retrieval_status=RetrievalStatus.NOT_CONFIGURED)
+
+        report = run_protocol_pipeline(
+            protocol_input=self.sample_protocol,
+            target_dir=self.repo_dir,
+            commit_hash="abcdef1234567890abcdef1234567890abcdef12",
+            allowed_workspaces=[self.workspace_dir],
+        )
+
+        stage_s4 = report.stages.get("static_analysis", {})
+        self.assertEqual(stage_s4.get("status"), StageStatus.FAILED.value)
+        self.assertIn("pipe broken", stage_s4.get("message", ""))
+        # CertiK stage still ran cleanly
+        stage_s5 = report.stages.get("security_intelligence", {})
+        self.assertEqual(stage_s5.get("status"), StageStatus.NOT_CONFIGURED.value)
+
+    # 15. Failed or skipped Slither stage never produces zero-finding false positive
+    @patch("defi_research.pipeline.verify_repository_source")
+    @patch("defi_research.pipeline.check_slither_availability", return_value=(False, None, "Slither not installed"))
+    @patch("defi_research.pipeline.query_protocol_security_intelligence")
+    def test_failed_slither_never_masquerades_as_clean_zero_findings(
+        self, mock_intel, mock_avail, mock_verify
+    ):
+        """Tool unavailability must never mark stage as SUCCESS or claim 0 findings."""
+        mock_verify.return_value = SourceVerificationRecord(
+            status=SourceVerificationStatus.SOURCE_VERIFIED,
+            repo_path=self.repo_dir,
+            build_framework="foundry",
+            commit_hash="abcdef1234567890abcdef1234567890abcdef12",
+        )
+        mock_intel.return_value = make_intel_result(retrieval_status=RetrievalStatus.NOT_CONFIGURED)
+
+        report = run_protocol_pipeline(
+            protocol_input=self.sample_protocol,
+            target_dir=self.repo_dir,
+            commit_hash="abcdef1234567890abcdef1234567890abcdef12",
+            allowed_workspaces=[self.workspace_dir],
+        )
+
+        stage_s4 = report.stages.get("static_analysis", {})
+        self.assertNotEqual(stage_s4.get("status"), StageStatus.SUCCESS.value)
+        self.assertEqual(stage_s4.get("status"), StageStatus.UNAVAILABLE.value)
+        self.assertEqual(report.static_analysis_status, StageStatus.UNAVAILABLE.value)
+        self.assertIsNone(report.slither_findings_count)
+
+    # 16. Sensitive secret redaction in exception messages
+    @patch("defi_research.pipeline.verify_repository_source")
+    @patch("defi_research.pipeline.check_slither_availability", return_value=(True, "0.10.4", None))
+    @patch("defi_research.pipeline.run_slither_analysis")
+    @patch("defi_research.pipeline.query_protocol_security_intelligence")
+    def test_secret_redaction_in_stage_exception(
+        self, mock_intel, mock_slither, mock_avail, mock_verify
+    ):
+        """Secrets appearing in exception strings are redacted before persisting in report."""
+        secret_key = "certik_sec_99998888777766665555444433332222"
+        mock_verify.return_value = SourceVerificationRecord(
+            status=SourceVerificationStatus.SOURCE_VERIFIED,
+            repo_path=self.repo_dir,
+            build_framework="foundry",
+            commit_hash="abcdef1234567890abcdef1234567890abcdef12",
+        )
+        mock_slither.side_effect = RuntimeError(f"Error accessing api_key={secret_key}")
+        mock_intel.return_value = make_intel_result(retrieval_status=RetrievalStatus.NOT_CONFIGURED)
+
+        report = run_protocol_pipeline(
+            protocol_input=self.sample_protocol,
+            target_dir=self.repo_dir,
+            commit_hash="abcdef1234567890abcdef1234567890abcdef12",
+            allowed_workspaces=[self.workspace_dir],
+        )
+
+        report_json = report.to_json()
+        self.assertNotIn(secret_key, report_json)
+
 
 if __name__ == "__main__":
     unittest.main()

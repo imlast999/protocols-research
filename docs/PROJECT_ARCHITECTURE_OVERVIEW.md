@@ -206,3 +206,29 @@ Serialized to `./reports/pipeline/pipeline_<slug>_<timestamp>.json`:
 
 ### 7.2 Batch Run Summary (`PipelineRunSummary`)
 Aggregates batch pipeline runs with `total_protocols`, `completed_count`, `partial_count`, `failed_count`, and array of individual protocol reports.
+
+---
+
+## 8. Testing Architecture & Continuous Integration (Phase 7)
+
+### 8.1 Offline Deterministic Test Suite
+The repository enforces 100% offline testability. All network queries (DefiLlama, CertiK, CoinGecko, Block Explorers) and subprocess executions (Docker CLI, Slither) are fully mocked in unit tests to guarantee zero network flakiness, sub-second execution, and zero secret leakage.
+
+Test modules breakdown (157 total tests):
+- [`tests/test_cli.py`](file:///c:/Users/lxstb/Documents/amm%20pools%20project/scripts%20protocols%20research/tests/test_cli.py): 10 tests verifying argument parsing and subcommand execution.
+- [`tests/test_pipeline.py`](file:///c:/Users/lxstb/Documents/amm%20pools%20project/scripts%20protocols%20research/tests/test_pipeline.py): 16 tests verifying 7-stage orchestration, stage failure isolation, and secret sanitization.
+- [`tests/test_slither_docker.py`](file:///c:/Users/lxstb/Documents/amm%20pools%20project/scripts%20protocols%20research/tests/test_slither_docker.py): 15 tests covering Docker argument construction, volume mounting, security flags, and error handling.
+- [`tests/test_contract_permission_scanner.py`](file:///c:/Users/lxstb/Documents/amm%20pools%20project/scripts%20protocols%20research/tests/test_contract_permission_scanner.py): 13 tests covering ABI analysis, modifier extraction, and TVL estimation.
+- [`tests/test_market_intelligence.py`](file:///c:/Users/lxstb/Documents/amm%20pools%20project/scripts%20protocols%20research/tests/test_market_intelligence.py): 10 tests covering address cleaning, chain aliases, and DefiLlama querying.
+- [`tests/test_notrack_script.py`](file:///c:/Users/lxstb/Documents/amm%20pools%20project/scripts%20protocols%20research/tests/test_notrack_script.py): 8 tests covering sector filtering and multi-chain resolution.
+- [`tests/test_security_intelligence.py`](file:///c:/Users/lxstb/Documents/amm%20pools%20project/scripts%20protocols%20research/tests/test_security_intelligence.py): 31 tests covering CertiK Partner API responses, matching heuristics, and pagination (30 passed, 1 skipped live opt-in).
+- [`tests/test_slither_runner.py`](file:///c:/Users/lxstb/Documents/amm%20pools%20project/scripts%20protocols%20research/tests/test_slither_runner.py): 14 tests covering native Slither subprocess execution and finding parsing.
+- [`tests/test_slither_security_audit.py`](file:///c:/Users/lxstb/Documents/amm%20pools%20project/scripts%20protocols%20research/tests/test_slither_security_audit.py): 17 tests verifying workspace jail containment, path traversal defense, and secret scrubbing.
+- [`tests/test_github_repository_resolver.py`](file:///c:/Users/lxstb/Documents/amm%20pools%20project/scripts%20protocols%20research/tests/test_github_repository_resolver.py): 23 tests verifying repository resolution heuristics and confidence grading.
+
+### 8.2 GitHub Actions CI Pipeline
+The automated CI pipeline ([`.github/workflows/ci.yml`](file:///c:/Users/lxstb/Documents/amm%20pools%20project/scripts%20protocols%20research/.github/workflows/ci.yml)) runs on all pull requests and pushes to `main`:
+- **Cross-Platform Matrix:** Validates execution across both `ubuntu-latest` and `windows-latest`.
+- **Python Compatibility:** Tested on Python `3.10`, `3.11`, and `3.12`.
+- **CLI Validation:** Executes all subcommands with `--help` to prevent argument regressions.
+- **Offline Reliability:** Guaranteed deterministic pass without requiring external API keys or Docker Desktop.

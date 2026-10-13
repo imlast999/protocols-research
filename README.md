@@ -229,7 +229,7 @@ Slither static analysis can execute either natively on the host (if `slither` an
 1. **Install and start Docker Desktop**: Ensure Docker Desktop is installed and the engine is running.
 2. **Build the reproducible image**:
    ```powershell
-   docker build -t defi-slither:0.10.2 .
+   docker build -t defi-slither:0.10.4 .
    ```
    The image is pinned to **Python 3.11-slim**, **Slither Analyzer 0.10.4**, and **solc-select 1.0.4**, with **solc 0.8.20** and **0.8.24** pre-installed.
 
@@ -355,27 +355,40 @@ The Phase 4 orchestrator generates standardized JSON reports:
 
 ---
 
-## Running Automated Tests
+## Running Automated Tests & Continuous Integration (CI)
 
-All tests are 100% deterministic, offline by default, and require no live network connections or external tools:
+All tests are 100% deterministic, offline by default, and require no live network connections, external tools, or secrets:
 
 ```bash
-# Run the complete test suite (98 tests total):
+# Run the complete test suite (157 tests total):
 python -m unittest discover -s tests -v
 
 # Run individual test modules:
+python -m unittest tests/test_cli.py -v
 python -m unittest tests/test_pipeline.py -v
+python -m unittest tests/test_slither_docker.py -v
+python -m unittest tests/test_contract_permission_scanner.py -v
+python -m unittest tests/test_market_intelligence.py -v
+python -m unittest tests/test_notrack_script.py -v
 python -m unittest tests/test_security_intelligence.py -v
 python -m unittest tests/test_slither_security_audit.py -v
 python -m unittest tests/test_slither_runner.py -v
 python -m unittest tests/test_github_repository_resolver.py -v
 ```
 
+### Automated Continuous Integration (GitHub Actions)
+The repository includes automated CI (`.github/workflows/ci.yml`) triggered on every push and pull request to `main`:
+- **Matrix OS:** `ubuntu-latest` and `windows-latest`.
+- **Python Matrix:** `3.10`, `3.11`, and `3.12`.
+- **Packaging:** Validates PEP 517/621 install (`pip install -e .`).
+- **CLI Validation:** Executes `--help` on root CLI and all 7 subcommands (`scan`, `market`, `notrack`, `resolve`, `slither`, `intelligence`, `pipeline`).
+- **Offline Integrity:** Runs the entire test suite completely offline with zero dependency on API keys or external services.
+
 ### Test Suite Summary
-- **Total Tests:** 98
-- **Passing:** 97
+- **Total Tests:** 157
+- **Passing:** 156
 - **Skipped:** 1 (explicit live opt-in test `test_live_api_authentication_and_query_flow`)
-- **Status:** 100% passing offline suite.
+- **Status:** 100% passing offline suite across Ubuntu and Windows.
 
 ---
 

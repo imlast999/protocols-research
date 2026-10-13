@@ -141,5 +141,5 @@ DEFAULT_OUTPUT_DIR = os.getenv("OUTPUT_DIR", "./reports")
 
 # Slither Execution Configuration (Native & Docker)
 SLITHER_BACKEND = os.getenv("SLITHER_BACKEND", "auto")  # 'auto', 'native', 'docker'
-SLITHER_DOCKER_IMAGE = os.getenv("SLITHER_DOCKER_IMAGE", "defi-slither:0.10.2")
+SLITHER_DOCKER_IMAGE = os.getenv("SLITHER_DOCKER_IMAGE", "defi-slither:0.10.4")
 SLITHER_DEFAULT_TIMEOUT = int(os.getenv("SLITHER_DEFAULT_TIMEOUT", "120"))

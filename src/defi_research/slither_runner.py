@@ -268,7 +268,7 @@ def check_docker_image_availability(
 def build_docker_run_args(
     target_dir: str,
     host_output_dir: str,
-    image_name: str,
+    image_name: Optional[str] = None,
     container_output_path: str = "/output/slither_out.json",
     docker_executable: Optional[str] = None,
     extra_slither_args: Optional[List[str]] = None,
@@ -289,6 +289,7 @@ def build_docker_run_args(
     - Working directory set to /repo
     - Never uses shell=True
     """
+    eff_image = image_name or os.getenv("SLITHER_DOCKER_IMAGE", "defi-slither:0.10.4")
     docker_bin = shutil.which(docker_executable or "docker") or docker_executable or "docker"
     real_target = os.path.realpath(os.path.abspath(target_dir))
     real_out = os.path.realpath(os.path.abspath(host_output_dir))
@@ -306,7 +307,7 @@ def build_docker_run_args(
         "-v", f"{real_target}:/repo:ro",
         "-v", f"{real_out}:/output:rw",
         "-w", "/repo",
-        image_name,
+        eff_image,
         "slither",
         ".",
         "--json",
@@ -333,7 +334,7 @@ def check_slither_availability(
     Executes subprocess without invoking a shell.
     """
     eff_backend = (backend or os.getenv("SLITHER_BACKEND", "auto")).lower()
-    eff_image = docker_image or os.getenv("SLITHER_DOCKER_IMAGE", "defi-slither:0.10.2")
+    eff_image = docker_image or os.getenv("SLITHER_DOCKER_IMAGE", "defi-slither:0.10.4")
 
     def _check_native() -> Tuple[bool, Optional[str], Optional[str]]:
         exe_name = custom_executable or "slither"
@@ -745,7 +746,7 @@ def run_slither_analysis(
 
     # Gate 7: Tool Availability & Execution Backend Selection
     eff_backend = (backend or os.getenv("SLITHER_BACKEND", "auto")).lower()
-    eff_image = docker_image or os.getenv("SLITHER_DOCKER_IMAGE", "defi-slither:0.10.2")
+    eff_image = docker_image or os.getenv("SLITHER_DOCKER_IMAGE", "defi-slither:0.10.4")
 
     selected_backend = "native"
     selected_version: Optional[str] = None
