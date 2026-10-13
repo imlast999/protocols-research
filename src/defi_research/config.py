@@ -43,6 +43,52 @@ def _load_env_file(filepath: str = ".env"):
 
 _load_env_file()
 
+
+def save_env_values(key_values: Dict[str, str], filepath: str = ".env") -> bool:
+    """
+    Safely updates or appends key-value pairs in the .env file.
+    Preserves comments and existing formatting.
+    Updates in-memory os.environ automatically.
+    """
+    from pathlib import Path
+    base_dir = Path(__file__).resolve().parent.parent.parent
+    target = base_dir / filepath
+
+    existing_lines = []
+    if target.exists():
+        try:
+            with open(target, "r", encoding="utf-8") as f:
+                existing_lines = f.readlines()
+        except Exception:
+            pass
+
+    updated_keys = set()
+    new_lines = []
+    for line in existing_lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            k, _ = stripped.split("=", 1)
+            k = k.strip()
+            if k in key_values:
+                val = key_values[k]
+                new_lines.append(f'{k}="{val}"\n')
+                os.environ[k] = val
+                updated_keys.add(k)
+                continue
+        new_lines.append(line)
+
+    for k, v in key_values.items():
+        if k not in updated_keys and v:
+            new_lines.append(f'{k}="{v}"\n')
+            os.environ[k] = v
+
+    try:
+        with open(target, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+        return True
+    except Exception:
+        return False
+
 @dataclass(frozen=True)
 class ChainConfig:
     name: str

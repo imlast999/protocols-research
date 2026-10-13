@@ -35,8 +35,15 @@ The project connects 7 logical stages into an end-to-end audit and intelligence 
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ 4. Controlled Static Analysis (slither_runner.py)                           │
 │    • Subprocess execution with shell=False in isolated workspaces           │
-│    • Zero untrusted build scripts or package installs                       │
+│    • Native or Docker backend (defi-slither:0.10.4)                         │
 │    • Parses structured JSON findings (High, Medium, Low, Info, Gas)         │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 4b. On-Chain Permission Analysis (contract_permission_scanner.py)           │
+│    • Heuristic explorer ABI & source code parsing (OpenZeppelin / custom)   │
+│    • Flags privileged methods (withdraw, mint, pause, setFee, migrate)      │
+│    • Identifies access controls (onlyOwner, onlyRole, Timelock, multi-sig)  │
 └──────────────────────────────────────┬──────────────────────────────────────┘
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -54,9 +61,9 @@ The project connects 7 logical stages into an end-to-end audit and intelligence 
 └──────────────────────────────────────┬──────────────────────────────────────┘
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ 7. Persistence & Reporting                                                  │
-│    • Writes structured JSON reports strictly within ./reports/pipeline/     │
-│    • Generates run-level summaries for batch operations                     │
+│ 7. Persistence & Reporting (discovery_store.py / reports/pipeline/)         │
+│    • Atomic JSON persistence with .bak recovery and analysis history        │
+│    • DiscoveredProtocolRecord schema with provenance and timestamps         │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -381,10 +388,12 @@ python packaging/build_exe.py
 All tests are 100% deterministic, offline by default, and require no live network connections, external tools, or secrets:
 
 ```bash
-# Run the complete test suite (181 tests total):
+# Run the complete test suite (192 tests total):
 python -m unittest discover -s tests -v
 
 # Run individual test modules:
+python -m unittest tests/test_end_to_end_pipeline.py -v
+python -m unittest tests/test_packaging_metadata.py -v
 python -m unittest tests/test_discovery_store.py -v
 python -m unittest tests/test_protocol_hunter.py -v
 python -m unittest tests/test_gui_headless.py -v
@@ -409,8 +418,8 @@ The repository includes automated CI (`.github/workflows/ci.yml`) triggered on e
 - **Offline Integrity:** Runs the entire test suite completely offline with headless Qt support (`QT_QPA_PLATFORM=offscreen`).
 
 ### Test Suite Summary
-- **Total Tests:** 181
-- **Passing:** 180
+- **Total Tests:** 192
+- **Passing:** 191
 - **Skipped:** 1 (explicit live opt-in test `test_live_api_authentication_and_query_flow`)
 - **Status:** 100% passing offline suite across Ubuntu and Windows.
 

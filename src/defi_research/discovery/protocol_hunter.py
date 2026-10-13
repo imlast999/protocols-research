@@ -255,24 +255,39 @@ class ProtocolHunter:
                 "session_id": self.config.session_id,
             }
 
-            # Optional deep investigation: Repository resolution
+            # Check if candidate is already known to avoid redundant external resolution
+            stable_id = generate_stable_protocol_id(slug=slug, name=name, chain=chain, address=clean_addr)
+            existing_record = self.store.get_record(stable_id)
+
+            # Optional deep investigation: Repository resolution (with caching to avoid redundant calls)
             if self.config.deep_investigation and slug:
-                try:
-                    res = resolve_github_repo_from_slug(slug, client=self.client)
-                    if isinstance(res, dict):
-                        record_data["repository_url"] = res.get("repository_url")
-                        record_data["repository_resolution_status"] = res.get("repository_resolution_status")
-                        conf = res.get("repository_confidence")
-                        record_data["repository_confidence_score"] = 0.95 if conf == "HIGH" else (0.5 if conf == "LOW" else 0.0)
-                        record_data["repository_confidence_reason"] = res.get("repository_resolution_reason")
-                    else:
-                        record_data["repository_url"] = getattr(res, "repo_url", None)
-                        status_val = getattr(res, "status", None)
-                        record_data["repository_resolution_status"] = getattr(status_val, "value", str(status_val)) if status_val else None
-                        record_data["repository_confidence_score"] = getattr(res, "confidence_score", None)
-                        record_data["repository_confidence_reason"] = getattr(res, "reason", None)
-                except Exception as res_err:
-                    self._log(f"[Hunter] Repo resolution error for {slug}: {res_err}")
+                if (
+                    existing_record
+                    and existing_record.repository_url
+                    and existing_record.repository_resolution_status
+                ):
+                    # Reuse cached resolution
+                    record_data["repository_url"] = existing_record.repository_url
+                    record_data["repository_resolution_status"] = existing_record.repository_resolution_status
+                    record_data["repository_confidence_score"] = existing_record.repository_confidence_score
+                    record_data["repository_confidence_reason"] = existing_record.repository_confidence_reason
+                else:
+                    try:
+                        res = resolve_github_repo_from_slug(slug, client=self.client)
+                        if isinstance(res, dict):
+                            record_data["repository_url"] = res.get("repository_url")
+                            record_data["repository_resolution_status"] = res.get("repository_resolution_status")
+                            conf = res.get("repository_confidence")
+                            record_data["repository_confidence_score"] = 0.95 if conf == "HIGH" else (0.5 if conf == "LOW" else 0.0)
+                            record_data["repository_confidence_reason"] = res.get("repository_resolution_reason")
+                        else:
+                            record_data["repository_url"] = getattr(res, "repo_url", None)
+                            status_val = getattr(res, "status", None)
+                            record_data["repository_resolution_status"] = getattr(status_val, "value", str(status_val)) if status_val else None
+                            record_data["repository_confidence_score"] = getattr(res, "confidence_score", None)
+                            record_data["repository_confidence_reason"] = getattr(res, "reason", None)
+                    except Exception as res_err:
+                        self._log(f"[Hunter] Repo resolution error for {slug}: {res_err}")
 
             record, is_new = self.store.upsert_record(record_data)
 
@@ -356,7 +371,7 @@ class ProtocolHunter:
                 # Wait for next cycle in short increments to allow fast stop response
                 wait_remaining = float(self.config.cycle_interval_seconds)
                 while wait_remaining > 0 and not self._stop_requested.is_set():
-                    sleep_chunk = min(1.0, wait_remaining)
+                    sleep_chunk = min(0.25, wait_remaining)
                     time.sleep(sleep_chunk)
                     wait_remaining -= sleep_chunk
                     self.metrics.elapsed_seconds = time.time() - start_time

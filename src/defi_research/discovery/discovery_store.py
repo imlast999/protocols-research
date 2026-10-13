@@ -146,10 +146,11 @@ class DiscoveredProtocolRecord:
         """
         Updates fields with new information while preventing silent regression:
         Never overwrites non-empty existing data with None or empty values.
+        Records an analysis history snapshot if security/analysis stages are updated.
         Updates last_updated_at timestamp.
         """
         for k, v in new_data.items():
-            if k in ("protocol_id", "first_discovered_at"):
+            if k in ("protocol_id", "first_discovered_at", "analysis_history"):
                 continue  # Never overwrite immutable identifiers or creation timestamp
 
             if v is not None:
@@ -158,6 +159,24 @@ class DiscoveredProtocolRecord:
                 if curr_val and (v == "" or v == [] or v == {}):
                     continue
                 setattr(self, k, v)
+
+        # Record analysis provenance snapshot if an analysis stage was executed/updated
+        if any(k in new_data for k in ("static_analysis_status", "permission_scanner_status", "security_intelligence_status")):
+            snapshot = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "static_analysis_status": getattr(self, "static_analysis_status", None),
+                "slither_backend": getattr(self, "slither_execution_backend", None),
+                "slither_findings_count": getattr(self, "slither_findings_count", None),
+                "permission_scanner_status": getattr(self, "permission_scanner_status", None),
+                "permission_critical_count": getattr(self, "permission_scanner_critical_count", None),
+                "security_intelligence_status": getattr(self, "security_intelligence_status", None),
+                "security_score": getattr(self, "security_score", None),
+            }
+            if self.analysis_history is None:
+                self.analysis_history = []
+            self.analysis_history.append(snapshot)
+            if len(self.analysis_history) > 20:
+                self.analysis_history = self.analysis_history[-20:]
 
         self.last_updated_at = datetime.now(timezone.utc).isoformat()
 
@@ -222,6 +241,19 @@ class DiscoveryStore:
 
             if is_new:
                 record = DiscoveredProtocolRecord.from_dict(record_data)
+                if any(getattr(record, k, None) for k in ("static_analysis_status", "permission_scanner_status", "security_intelligence_status")):
+                    snapshot = {
+                        "timestamp": record.last_updated_at,
+                        "static_analysis_status": getattr(record, "static_analysis_status", None),
+                        "slither_backend": getattr(record, "slither_execution_backend", None),
+                        "slither_findings_count": getattr(record, "slither_findings_count", None),
+                        "permission_scanner_status": getattr(record, "permission_scanner_status", None),
+                        "permission_critical_count": getattr(record, "permission_scanner_critical_count", None),
+                        "security_intelligence_status": getattr(record, "security_intelligence_status", None),
+                        "security_score": getattr(record, "security_score", None),
+                    }
+                    if not record.analysis_history:
+                        record.analysis_history = [snapshot]
                 self._records[proto_id_lower] = record
             else:
                 record = self._records[proto_id_lower]

@@ -126,6 +126,11 @@ class MainWindow(QMainWindow):
         self.certik_pill.clicked.connect(self._show_certik_status_dialog)
         header_layout.addWidget(self.certik_pill)
 
+        self.btn_settings = QPushButton("⚙️ Settings & API Keys")
+        self.btn_settings.setToolTip("Configure CertiK, Explorer API keys, and Slither backend")
+        self.btn_settings.clicked.connect(self._show_settings_dialog)
+        header_layout.addWidget(self.btn_settings)
+
         main_layout.addLayout(header_layout)
 
         # 2. Main Tab Widget
@@ -590,7 +595,7 @@ class MainWindow(QMainWindow):
             "<li><b>Protocol Discovery, Repository Resolution, and CertiK Intelligence</b> "
             "do NOT require Docker and operate with 100% functionality.</li>"
             "<li>To enable live Slither static analysis on Windows, ensure Docker Desktop is running with WSL2 and build the analyzer image:<br>"
-            "<code>docker build -t defi-slither:0.10.4 -f docker/slither/Dockerfile .</code></li>"
+            "<code>docker build -t defi-slither:0.10.4 .</code></li>"
             "<li>Any analysis conducted without Docker will be explicitly flagged as <code>UNAVAILABLE</code> "
             "and will never masquerade as a clean 0-findings audit.</li>"
             "</ul>"
@@ -607,12 +612,146 @@ class MainWindow(QMainWindow):
             "<p><b>Guidance:</b></p>"
             "<ul>"
             "<li>Commercial CertiK security intelligence requires a partner API key.</li>"
-            "<li>Configure <code>CERTIK_API_KEY</code> in your <code>.env</code> file or system environment variables.</li>"
+            "<li>Configure <code>CERTIK_API_KEY</code> in your <code>.env</code> file, environment variables, or via the <b>⚙️ Settings & API Keys</b> dialog.</li>"
             "<li>When missing, the pipeline marks security intelligence as <code>NOT_CONFIGURED</code> cleanly "
             "without interrupting protocol discovery or repository resolution.</li>"
             "</ul>"
         )
         QMessageBox.information(self, "CertiK Skynet API Status", msg)
+
+    def _show_settings_dialog(self):
+        """Displays secure settings dialog for configuring API keys and execution preferences."""
+        from defi_research.config import save_env_values
+        from defi_research.security_intelligence import check_live_api_connectivity
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Application Configuration & API Keys")
+        dialog.resize(580, 520)
+        d_layout = QVBoxLayout(dialog)
+        d_layout.setSpacing(12)
+
+        # 1. CertiK Group
+        certik_box = QGroupBox("CertiK Skynet Partner API Configuration")
+        c_layout = QGridLayout(certik_box)
+
+        c_layout.addWidget(QLabel("CertiK API Key:"), 0, 0)
+        key_input = QLineEdit(os.getenv("CERTIK_API_KEY", ""))
+        key_input.setEchoMode(QLineEdit.Password)
+        c_layout.addWidget(key_input, 0, 1)
+
+        btn_toggle_key = QPushButton("👁️")
+        btn_toggle_key.setFixedWidth(36)
+        def _toggle_echo():
+            if key_input.echoMode() == QLineEdit.Password:
+                key_input.setEchoMode(QLineEdit.Normal)
+            else:
+                key_input.setEchoMode(QLineEdit.Password)
+        btn_toggle_key.clicked.connect(_toggle_echo)
+        c_layout.addWidget(btn_toggle_key, 0, 2)
+
+        btn_test_certik = QPushButton("🧪 Test CertiK Connection")
+        def _test_certik():
+            test_key = key_input.text().strip()
+            if not test_key:
+                QMessageBox.warning(dialog, "Missing Key", "Please enter a CertiK API key before testing connection.")
+                return
+            old_key = os.environ.get("CERTIK_API_KEY")
+            os.environ["CERTIK_API_KEY"] = test_key
+            try:
+                ok, diag = check_live_api_connectivity()
+                if ok:
+                    QMessageBox.information(dialog, "CertiK Live Check", f"✅ Connection successful!\n{diag}")
+                else:
+                    QMessageBox.warning(dialog, "CertiK Live Check", f"⚠️ Connection test returned: {diag}")
+            finally:
+                if old_key is not None:
+                    os.environ["CERTIK_API_KEY"] = old_key
+                else:
+                    os.environ.pop("CERTIK_API_KEY", None)
+
+        btn_test_certik.clicked.connect(_test_certik)
+        c_layout.addWidget(btn_test_certik, 1, 1, 1, 2)
+
+        d_layout.addWidget(certik_box)
+
+        # 2. Explorer API Keys Group
+        explorer_box = QGroupBox("Explorer API Keys (for Heuristic On-Chain Permission Scanner)")
+        e_layout = QGridLayout(explorer_box)
+
+        e_layout.addWidget(QLabel("Etherscan API Key:"), 0, 0)
+        eth_key_in = QLineEdit(os.getenv("ETHERSCAN_API_KEY", ""))
+        eth_key_in.setEchoMode(QLineEdit.Password)
+        e_layout.addWidget(eth_key_in, 0, 1)
+
+        e_layout.addWidget(QLabel("Arbiscan API Key:"), 1, 0)
+        arb_key_in = QLineEdit(os.getenv("ARBISCAN_API_KEY", ""))
+        arb_key_in.setEchoMode(QLineEdit.Password)
+        e_layout.addWidget(arb_key_in, 1, 1)
+
+        e_layout.addWidget(QLabel("Polygonscan API Key:"), 2, 0)
+        poly_key_in = QLineEdit(os.getenv("POLYGONSCAN_API_KEY", ""))
+        poly_key_in.setEchoMode(QLineEdit.Password)
+        e_layout.addWidget(poly_key_in, 2, 1)
+
+        e_layout.addWidget(QLabel("BscScan API Key:"), 3, 0)
+        bsc_key_in = QLineEdit(os.getenv("BSCSCAN_API_KEY", ""))
+        bsc_key_in.setEchoMode(QLineEdit.Password)
+        e_layout.addWidget(bsc_key_in, 3, 1)
+
+        d_layout.addWidget(explorer_box)
+
+        # 3. Slither Settings Group
+        slither_box = QGroupBox("Slither Static Analysis Configuration")
+        s_layout = QGridLayout(slither_box)
+
+        s_layout.addWidget(QLabel("Execution Backend:"), 0, 0)
+        backend_combo = QComboBox()
+        backend_combo.addItems(["auto", "docker", "native"])
+        curr_b = os.getenv("SLITHER_BACKEND", "auto").lower()
+        idx = backend_combo.findText(curr_b)
+        backend_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        s_layout.addWidget(backend_combo, 0, 1)
+
+        s_layout.addWidget(QLabel("Docker Image Tag:"), 1, 0)
+        image_in = QLineEdit(os.getenv("SLITHER_DOCKER_IMAGE", "defi-slither:0.10.4"))
+        s_layout.addWidget(image_in, 1, 1)
+
+        btn_check_slither = QPushButton("🧪 Check Slither & Docker")
+        btn_check_slither.clicked.connect(self._show_docker_status_dialog)
+        s_layout.addWidget(btn_check_slither, 2, 1)
+
+        d_layout.addWidget(slither_box)
+
+        # 4. Save and Cancel Buttons
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.clicked.connect(dialog.reject)
+        btn_row.addWidget(btn_cancel)
+
+        btn_save = QPushButton("💾 Save & Apply")
+        btn_save.setObjectName("primaryBtn")
+        def _save_settings():
+            to_save = {
+                "CERTIK_API_KEY": key_input.text().strip(),
+                "ETHERSCAN_API_KEY": eth_key_in.text().strip(),
+                "ARBISCAN_API_KEY": arb_key_in.text().strip(),
+                "POLYGONSCAN_API_KEY": poly_key_in.text().strip(),
+                "BSCSCAN_API_KEY": bsc_key_in.text().strip(),
+                "SLITHER_BACKEND": backend_combo.currentText(),
+                "SLITHER_DOCKER_IMAGE": image_in.text().strip(),
+            }
+            save_env_values(to_save)
+            self._check_environment_status()
+            QMessageBox.information(dialog, "Settings Saved", "Configuration saved and applied successfully.")
+            dialog.accept()
+
+        btn_save.clicked.connect(_save_settings)
+        btn_row.addWidget(btn_save)
+
+        d_layout.addLayout(btn_row)
+        dialog.exec()
 
     # -------------------------------------------------------------------------
     # TABLE & DETAIL SYNCHRONIZATION
@@ -754,6 +893,19 @@ class MainWindow(QMainWindow):
             if r.permission_scanner_critical_count is not None
             else "Not scanned"
         )
+        perm_findings_html = ""
+        if r.permission_scanner_findings:
+            items_html = "".join(
+                f"<li><code>{f.get('signature', 'unknown')}</code> "
+                f"[{f.get('category', 'unknown')}] "
+                f"(modifiers: {', '.join(f.get('modifiers', [])) or 'none'})</li>"
+                for f in r.permission_scanner_findings[:10]
+            )
+            if len(r.permission_scanner_findings) > 10:
+                items_html += f"<li>... and {len(r.permission_scanner_findings) - 10} more</li>"
+            perm_findings_html = f"<br><b>Detected Signals:</b><ul>{items_html}</ul>"
+        elif r.permission_scanner_status == "SUCCESS":
+            perm_findings_html = "<br><b>Findings:</b> Clean (No unhedged administrative/privileged keywords detected)"
 
         detail_md = f"""
 <h3>📌 General Metadata</h3>
@@ -795,7 +947,7 @@ class MainWindow(QMainWindow):
 
 <h3>⚡ On-Chain Permission Scanner [HEURISTIC]</h3>
 <b>Status:</b> {r.permission_scanner_status or 'NOT_SCANNED'}<br>
-<b>Critical Signals:</b> {perm_crit}<br>
+<b>Critical Signals:</b> {perm_crit}{perm_findings_html}<br>
 <small style="color: #8b949e;">* Explorer ABI regex search is heuristic and requires Foundry simulation confirmation.</small>
 <hr>
 
@@ -854,6 +1006,7 @@ class MainWindow(QMainWindow):
         static_analysis = report_dict.get("static_analysis", {})
         sec_intel = report_dict.get("security_intelligence", {})
         repo_info = report_dict.get("repository", {})
+        perm_scan = report_dict.get("on_chain_permission_analysis", {})
 
         update_data = {
             "slug": slug,
@@ -869,6 +1022,9 @@ class MainWindow(QMainWindow):
             "audit_count": sec_intel.get("audit_count"),
             "repository_url": repo_info.get("url"),
             "repository_resolution_status": repo_info.get("resolution_status"),
+            "permission_scanner_status": perm_scan.get("status"),
+            "permission_scanner_critical_count": perm_scan.get("critical_count"),
+            "permission_scanner_findings": perm_scan.get("findings", []),
         }
 
         rec, _ = self.store.upsert_record(update_data)

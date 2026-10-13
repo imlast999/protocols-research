@@ -18,6 +18,7 @@ _LAZY_EXPORTS = {
     "ChainConfig": "defi_research.config",
     "DEFAULT_OUTPUT_DIR": "defi_research.config",
     "WORKSPACE_ROOT": "defi_research.config",
+    "save_env_values": "defi_research.config",
     # contract_permission_scanner
     "ContractScanner": "defi_research.contract_permission_scanner",
     # github_repository_resolver

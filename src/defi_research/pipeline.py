@@ -121,6 +121,7 @@ STANDARD_LIMITATIONS: List[str] = [
     "Repository source code is not guaranteed to correspond to on-chain deployed bytecode without formal bytecode verification.",
     "External security scores and audit counts do not guarantee smart contract immunity from zero-day vulnerabilities.",
     "External security intelligence is informational and never bypasses repository verification or Slither eligibility gates.",
+    "On-chain access modifier scanning is heuristic regex pattern matching on verified explorer source code; it cannot prove bytecode equivalence or catch complex multi-contract delegatecall authorization schemes.",
 ]
 
 
@@ -181,6 +182,13 @@ class ProtocolPipelineReport:
     slither_diagnostics: Optional[str] = None
     slither_execution_backend: Optional[str] = None
 
+    # Stage 4b: On-chain heuristic permission analysis details
+    permission_scanner_status: Optional[str] = None
+    permission_scanner_contract: Optional[str] = None
+    permission_scanner_critical_count: Optional[int] = None
+    permission_scanner_findings: List[Dict[str, Any]] = field(default_factory=list)
+    permission_scanner_diagnostics: Optional[str] = None
+
     # Stage 5: Security intelligence details
     security_intelligence_status: Optional[str] = None
     security_score: Optional[float] = None          # None if unknown, NEVER 0!
@@ -222,6 +230,13 @@ class ProtocolPipelineReport:
                 "findings_count": self.slither_findings_count,
                 "findings_summary": self.slither_findings_summary,
                 "diagnostics": self.slither_diagnostics,
+            },
+            "on_chain_permission_analysis": {
+                "status": self.permission_scanner_status,
+                "contract_address": self.permission_scanner_contract,
+                "critical_count": self.permission_scanner_critical_count,
+                "findings": self.permission_scanner_findings,
+                "diagnostics": self.permission_scanner_diagnostics,
             },
             "security_intelligence": {
                 "status": self.security_intelligence_status,
@@ -312,15 +327,18 @@ def run_protocol_pipeline(
     allowed_workspaces: Optional[List[str]] = None,
     slither_backend: Optional[str] = None,
     docker_image: Optional[str] = None,
+    contract_address: Optional[str] = None,
+    skip_permission_scan: bool = False,
 ) -> ProtocolPipelineReport:
     """
-    Execute the end-to-end 7-stage pipeline for a single DeFi protocol.
+    Execute the end-to-end 8-stage pipeline for a single DeFi protocol.
 
     Stages:
     1. Discovery: Extract and normalize protocol metadata from DefiLlama.
     2. Repository Resolution: Identify canonical GitHub repository and confidence.
     3. Source Verification: Verify local files, Solidity presence, and build framework.
     4. Static Analysis: Sandboxed Slither analysis (strictly gated on verification).
+    4b. Permission Analysis: On-chain heuristic ABI modifier scan on verified contracts.
     5. Security Intelligence: Query CertiK Skynet score and audit records.
     6. Aggregation: Consolidate outcomes, verify errors, and determine overall status.
     7. Persistence: Save structured JSON artifact if output_dir is configured.
@@ -670,6 +688,123 @@ def run_protocol_pipeline(
                     errors.append(f"Static analysis error: {exc}")
 
     # -------------------------------------------------------------------------
+    # Stage 4b: On-Chain Permission Analysis (ContractScanner / Explorer ABI)
+    # -------------------------------------------------------------------------
+    t_stage = time.time()
+    s4b_iso_start = datetime.now(timezone.utc).isoformat()
+    perm_findings: List[Dict[str, Any]] = []
+    perm_critical_count: Optional[int] = None
+    perm_status: StageStatus = StageStatus.SKIPPED
+    perm_contract: Optional[str] = None
+    perm_diag: str = ""
+
+    candidate_addr = contract_address or normalized.get("address")
+    if not candidate_addr and normalized.get("contracts"):
+        c_list = normalized.get("contracts")
+        if isinstance(c_list, list) and len(c_list) > 0:
+            candidate_addr = c_list[0]
+
+    if candidate_addr and isinstance(candidate_addr, str):
+        try:
+            from defi_research.market_intelligence import clean_contract_address
+        except ImportError:
+            from market_intelligence import clean_contract_address
+        cleaned = clean_contract_address(candidate_addr)
+        if cleaned:
+            perm_contract = cleaned
+
+    if skip_permission_scan:
+        perm_status = StageStatus.SKIPPED
+        perm_diag = "On-chain permission scanning skipped by configuration"
+        stage_outcomes["permission_analysis"] = StageOutcome(
+            status=perm_status,
+            message=perm_diag,
+            started_at=s4b_iso_start,
+            completed_at=datetime.now(timezone.utc).isoformat(),
+            duration_seconds=time.time() - t_stage,
+        )
+    elif not perm_contract:
+        perm_status = StageStatus.SKIPPED
+        perm_diag = "No valid on-chain contract address available for permission scanning"
+        stage_outcomes["permission_analysis"] = StageOutcome(
+            status=perm_status,
+            message=perm_diag,
+            started_at=s4b_iso_start,
+            completed_at=datetime.now(timezone.utc).isoformat(),
+            duration_seconds=time.time() - t_stage,
+        )
+    else:
+        try:
+            from defi_research.config import CHAINS
+            from defi_research.market_intelligence import CHAIN_ALIAS_MAP
+        except ImportError:
+            from config import CHAINS
+            from market_intelligence import CHAIN_ALIAS_MAP
+
+        raw_chain = (chain or "").lower()
+        effective_chain = CHAIN_ALIAS_MAP.get(raw_chain, raw_chain)
+
+        if effective_chain not in CHAINS:
+            perm_status = StageStatus.SKIPPED
+            perm_diag = f"Chain '{effective_chain}' is not supported for explorer ABI retrieval (Supported: {list(CHAINS.keys())})"
+            stage_outcomes["permission_analysis"] = StageOutcome(
+                status=perm_status,
+                message=perm_diag,
+                started_at=s4b_iso_start,
+                completed_at=datetime.now(timezone.utc).isoformat(),
+                duration_seconds=time.time() - t_stage,
+                details={"contract_address": perm_contract, "chain": effective_chain},
+            )
+        else:
+            try:
+                try:
+                    from defi_research.contract_permission_scanner import ContractScanner
+                except ImportError:
+                    from contract_permission_scanner import ContractScanner
+
+                scanner = ContractScanner(chain_key=effective_chain)
+                scan_res = scanner.scan_contract(perm_contract)
+
+                perm_findings = scan_res.get("findings", [])
+                perm_critical_count = scan_res.get("critical_count", 0)
+                perm_status = StageStatus.SUCCESS
+                contract_name = scan_res.get("contract_name", "UnknownContract")
+                perm_diag = (
+                    f"Heuristic access modifier analysis completed on verified contract '{contract_name}' "
+                    f"({len(perm_findings)} sensitive functions flagged, {perm_critical_count} critical/high)"
+                )
+
+                stage_outcomes["permission_analysis"] = StageOutcome(
+                    status=perm_status,
+                    message=perm_diag,
+                    started_at=s4b_iso_start,
+                    completed_at=datetime.now(timezone.utc).isoformat(),
+                    duration_seconds=time.time() - t_stage,
+                    details={
+                        "contract_address": perm_contract,
+                        "contract_name": contract_name,
+                        "chain": effective_chain,
+                        "findings_count": len(perm_findings),
+                        "critical_count": perm_critical_count,
+                        "analysis_type": "HEURISTIC",
+                        "tvl_data": scan_res.get("tvl_data"),
+                    },
+                )
+            except Exception as scan_err:
+                err_str = str(scan_err)
+                logger.warning(f"Permission scanner error for {perm_contract} on {effective_chain}: {err_str}")
+                perm_status = StageStatus.FAILED
+                perm_diag = sanitize_secret_text(f"Permission scanner error: {err_str}") or ""
+                stage_outcomes["permission_analysis"] = StageOutcome(
+                    status=perm_status,
+                    message=perm_diag,
+                    started_at=s4b_iso_start,
+                    completed_at=datetime.now(timezone.utc).isoformat(),
+                    duration_seconds=time.time() - t_stage,
+                    details={"contract_address": perm_contract, "chain": effective_chain},
+                )
+
+    # -------------------------------------------------------------------------
     # Stage 5: Security Intelligence (CertiK / Skynet)
     # -------------------------------------------------------------------------
     t_stage = time.time()
@@ -733,16 +868,30 @@ def run_protocol_pipeline(
     duration_total = time.time() - t_start
 
     # Determine Overall Lifecycle Status:
-    # COMPLETED: All critical stages executed with SUCCESS
-    # PARTIAL: Some stages succeeded, others skipped / unconfigured / unavailable
-    # FAILED: Discovery failed or resolution failed with errors
+    # COMPLETED: All critical and applicable core stages executed with SUCCESS
+    # PARTIAL: Some stages succeeded, others skipped / unconfigured / unavailable / failed
+    # FAILED: Critical discovery or resolution stages failed
     critical_statuses = [
         stage_outcomes["discovery"].status,
         stage_outcomes["repository_resolution"].status,
     ]
+
+    perm_outcome = stage_outcomes.get("permission_analysis")
+    perm_success = (
+        perm_outcome is None
+        or perm_outcome.status == StageStatus.SUCCESS
+        or (perm_outcome.status == StageStatus.SKIPPED and (not candidate_addr or skip_permission_scan))
+    )
+
+    core_stages_success = all(
+        outcome.status == StageStatus.SUCCESS
+        for key, outcome in stage_outcomes.items()
+        if key != "permission_analysis"
+    )
+
     if any(s == StageStatus.FAILED for s in critical_statuses):
         overall_status = PipelineOverallStatus.FAILED
-    elif all(s.status == StageStatus.SUCCESS for s in stage_outcomes.values()):
+    elif core_stages_success and perm_success:
         overall_status = PipelineOverallStatus.COMPLETED
     else:
         overall_status = PipelineOverallStatus.PARTIAL
@@ -791,6 +940,11 @@ def run_protocol_pipeline(
         slither_findings_summary=findings_summary,
         slither_diagnostics=slither_diag,
         slither_execution_backend=getattr(slither_result, "execution_backend", None) if slither_result else None,
+        permission_scanner_status=perm_status.value if perm_status else None,
+        permission_scanner_contract=perm_contract,
+        permission_scanner_critical_count=perm_critical_count,
+        permission_scanner_findings=perm_findings,
+        permission_scanner_diagnostics=perm_diag,
         security_intelligence_status=sec_status_str,
         security_score=sec_score,
         security_score_grade=sec_grade,
