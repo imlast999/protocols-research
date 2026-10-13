@@ -60,7 +60,7 @@ The project connects 7 logical stages into an end-to-end audit and intelligence 
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-For complete technical details, see the [Architecture Guide](docs/architecture.md).
+For complete technical details, see the [Architecture Overview](docs/PROJECT_ARCHITECTURE_OVERVIEW.md), the [Project Status & Roadmap](docs/PROJECT_STATUS_AND_ROADMAP.md), and the [Security Architecture Guide](docs/architecture.md).
 
 ---
 
@@ -75,9 +75,12 @@ For complete technical details, see the [Architecture Guide](docs/architecture.m
 ├── .env.example                  # Sanitized environment template
 ├── .gitignore                    # Git ignore rules (.env, caches, venv)
 ├── README.md                     # Project documentation
+├── PHASE4_PIPELINE_AND_REFACTOR_REPORT.md # Phase 4 delivery report
 ├── docs/
-│   ├── architecture.md           # Deep-dive architecture and security gates
-│   └── reports/                  # Phase implementation reports (Phases 1 - 3.1)
+│   ├── PROJECT_STATUS_AND_ROADMAP.md      # Comprehensive audit, gap analysis & roadmap
+│   ├── PROJECT_ARCHITECTURE_OVERVIEW.md   # Architectural deep-dive & data flow
+│   ├── architecture.md                    # Core architecture & security gates
+│   └── reports/                           # Phase implementation reports (Phases 1 - 3.1)
 ├── reports/                      # Runtime generated reports
 │   ├── pipeline/                 # Consolidated Phase 4 reports
 │   └── slither/                  # Raw Slither static analysis reports
