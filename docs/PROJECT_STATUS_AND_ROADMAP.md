@@ -1,9 +1,9 @@
 # Complete Project Audit, Implementation Roadmap & Gap Analysis
 
 **Audit Date:** 2026-10-13
-**Audited Commit:** `f03d442` (Phase 6) -> Updating to Phase 7
+**Audited Commit:** `01f9862` (Phase 7) -> Phase 8 Implementation
 **Overall Project Readiness:** `READY_WITH_LIMITATIONS`
-**Test Suite State:** 157 tests executed, 156 passed, 1 skipped (0 failures, 100% offline passing)
+**Test Suite State:** 181 tests executed, 180 passed, 1 skipped (0 failures, 100% offline passing)
 **Workspace:** `c:\Users\lxstb\Documents\amm pools project\scripts protocols research`
 **Target Repository:** `https://github.com/imlast999/protocols-research.git`
 
@@ -437,7 +437,19 @@ scripts protocols research/
 
 ---
 
-#### Phase 8 — On-Chain Permission Scanner Integration into Pipeline
+#### Phase 8 — Windows Desktop Application & Continuous Protocol Discovery (COMPLETED)
+- **Objective:** Deliver a standalone Windows desktop application (PySide6) and background discovery engine (Protocol Hunter) distributed as a standalone `.exe`.
+- **Delivered:**
+  - `src/defi_research/discovery/discovery_store.py`: Versioned JSON store (`1.0.0`) with atomic disk writes (`.tmp` -> replace), automatic backup rotation (`.bak`), corruption recovery, and user-data path isolation (`%APPDATA%\DeFiResearch`).
+  - `src/defi_research/discovery/protocol_hunter.py`: Continuous background protocol discovery service with configurable duration, cycle intervals, TVL thresholds, rate-limit resilience, and deep repository resolution.
+  - `src/defi_research/gui/`: PySide6 dark-themed application (`main_window.py`, `workers.py`, `theme.py`, `app.py`) providing Protocol Explorer, live dashboard stats, Protocol Hunter controls, and report viewers.
+  - `packaging/`: PyInstaller specification (`defi_research.spec`) and build script (`build_exe.py`) generating `dist/DeFiProtocolResearch/DeFiProtocolResearch.exe`.
+  - Automated tests: 24 new tests (`test_discovery_store.py`, `test_protocol_hunter.py`, `test_gui_headless.py`, `test_cli.py`) bringing the test suite to 181 tests (180 passed, 0 failures, 1 skipped).
+- **Status:** COMPLETED.
+
+---
+
+#### Phase 9 — On-Chain Permission Scanner Integration into Pipeline
 - **Objective:** Unify Path B (`contract_permission_scanner.py`) into the 7-stage orchestrator as a dedicated On-Chain Contract Inspection stage.
 - **Features to Implement:**
   - Add Stage 4b (`on_chain_permission_analysis`) to `pipeline.py`.
@@ -446,7 +458,7 @@ scripts protocols research/
   - Support opt-out flag `--skip-onchain-scan`.
 - **Files Changing:** `src/defi_research/pipeline.py`, `src/defi_research/contract_permission_scanner.py`, `cli.py`, `tests/test_pipeline.py`.
 - **Security Considerations:** Handle explorer API rate limits gracefully (HTTP 429 backoff). If explorer keys are missing, mark stage as `NOT_CONFIGURED` without failing the pipeline.
-- **Tests & Acceptance Criteria:** 4 new unit tests in `test_pipeline.py` verifying stage integration, mocked explorer responses, and graceful degradation.
+- **Tests & Acceptance Criteria:** Unit tests in `test_pipeline.py` verifying stage integration, mocked explorer responses, and graceful degradation.
 - **Definition of Done:** Running `python cli.py pipeline --slug <slug>` outputs both repository static analysis and on-chain access-control findings in a unified report.
 - **Offline Capable:** Yes (via mocked explorer responses).
 

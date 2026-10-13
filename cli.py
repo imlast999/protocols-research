@@ -718,6 +718,41 @@ def run_interactive_mode():
             print("[!] Opción no reconocida. Por favor ingresa un número del 1 al 8.")
 
 
+def cmd_gui(args, logger: logging.Logger):
+    """Lanza la aplicación de escritorio PySide6."""
+    from defi_research.gui.app import launch_gui
+    print("=" * 80)
+    print("[*] LANZANDO APLICACIÓN DE ESCRITORIO (PySide6 Desktop GUI)")
+    print("=" * 80)
+    launch_gui(
+        db_path=getattr(args, "db_path", None),
+        data_dir=getattr(args, "data_dir", None),
+        headless=getattr(args, "headless", False),
+    )
+
+
+def cmd_hunter(args, logger: logging.Logger):
+    """Ejecuta el servicio de descubrimiento continuo Protocol Hunter por consola."""
+    from defi_research.discovery.protocol_hunter import ProtocolHunter, HunterConfig
+    from defi_research.discovery.discovery_store import DiscoveryStore
+    print("=" * 80)
+    print("[*] SERVICIO CONTINUO: PROTOCOL HUNTER")
+    print(f"[*] Duración: {args.hours}h | Intervalo: {args.interval}s | Min TVL: ${args.min_tvl:,.2f}")
+    print("=" * 80)
+
+    cfg = HunterConfig(
+        duration_hours=args.hours,
+        cycle_interval_seconds=args.interval,
+        min_tvl=args.min_tvl,
+        chains=[args.chain] if args.chain else None,
+        max_candidates_per_cycle=args.max_candidates,
+        deep_investigation=args.deep,
+    )
+    store = DiscoveryStore()
+    hunter = ProtocolHunter(config=cfg, store=store)
+    hunter.start()
+
+
 def main():
     common_parser = argparse.ArgumentParser(add_help=False)
     common_parser.add_argument("-v", "--verbose", action="store_true", help="Activa logs detallados y modo verbose")
@@ -791,6 +826,21 @@ def main():
     p_pipeline.add_argument("--live-check", action="store_true", help="Opt-in para consultas a APIs en vivo autenticadas")
     p_pipeline.add_argument("--json", action="store_true", help="Imprimir salida en formato JSON estructurado")
 
+    # Subcomando: gui (Fase 8)
+    p_gui = subparsers.add_parser("gui", parents=[common_parser], help="Lanzar la aplicación de escritorio PySide6 (Fase 8)")
+    p_gui.add_argument("--data-dir", default=None, help="Directorio de datos del usuario personalizado")
+    p_gui.add_argument("--db-path", default=None, help="Ruta al archivo JSON de base de datos de descubrimiento")
+    p_gui.add_argument("--headless", action="store_true", help="Iniciar en modo headless para pruebas automatizadas")
+
+    # Subcomando: hunter (Fase 8)
+    p_hunter = subparsers.add_parser("hunter", parents=[common_parser], help="Ejecutar Protocol Hunter en modo continuo por consola (Fase 8)")
+    p_hunter.add_argument("--hours", type=float, default=1.0, help="Duración en horas (default: 1.0)")
+    p_hunter.add_argument("--interval", type=int, default=60, help="Intervalo entre ciclos en segundos (default: 60)")
+    p_hunter.add_argument("--min-tvl", type=float, default=50000.0, help="TVL mínimo en USD (default: 50,000)")
+    p_hunter.add_argument("--chain", default=None, help="Cadena EVM específica")
+    p_hunter.add_argument("--max-candidates", type=int, default=25, help="Máximo de candidatos por ciclo (default: 25)")
+    p_hunter.add_argument("--deep", action="store_true", help="Investigación profunda (resolver repositorios GitHub)")
+
     args = parser.parse_args()
 
     # Si no se pasa ningún subcomando, lanzar el modo interactivo
@@ -814,6 +864,10 @@ def main():
         cmd_intelligence(args, logger)
     elif args.subcommand == "pipeline":
         cmd_pipeline(args, logger)
+    elif args.subcommand == "gui":
+        cmd_gui(args, logger)
+    elif args.subcommand == "hunter":
+        cmd_hunter(args, logger)
 
 
 if __name__ == "__main__":

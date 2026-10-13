@@ -240,6 +240,28 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(parsed_json["protocol_name"], "Aave V3")
         self.assertEqual(parsed_json["slither_execution_backend"], "docker")
 
+    # 11. CLI gui subcommand dispatch
+    @patch("defi_research.gui.app.launch_gui", return_value=0)
+    def test_cli_gui_dispatch(self, mock_launch_gui):
+        """CLI gui subcommand dispatches to launch_gui with parameters."""
+        with patch("sys.stdout", new_callable=io.StringIO):
+            with patch("sys.argv", ["cli.py", "gui", "--headless", "--data-dir", "/custom/data"]):
+                cli.main()
+
+        mock_launch_gui.assert_called_once()
+        self.assertTrue(mock_launch_gui.call_args[1].get("headless"))
+        self.assertEqual(mock_launch_gui.call_args[1].get("data_dir"), "/custom/data")
+
+    # 12. CLI hunter subcommand dispatch
+    @patch("defi_research.discovery.protocol_hunter.ProtocolHunter.start")
+    def test_cli_hunter_dispatch(self, mock_hunter_start):
+        """CLI hunter subcommand configures ProtocolHunter and executes start()."""
+        with patch("sys.stdout", new_callable=io.StringIO):
+            with patch("sys.argv", ["cli.py", "hunter", "--hours", "0.5", "--min-tvl", "100000", "--deep"]):
+                cli.main()
+
+        mock_hunter_start.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

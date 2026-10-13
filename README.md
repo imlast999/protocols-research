@@ -357,13 +357,37 @@ The Phase 4 orchestrator generates standardized JSON reports:
 
 ## Running Automated Tests & Continuous Integration (CI)
 
+### 6. Windows Desktop Application & Protocol Hunter (Phase 8)
+
+The project includes a PySide6 dark-themed research dashboard with continuous protocol discovery:
+
+```bash
+# Launch the desktop application from source:
+python desktop_app.py
+# Or via CLI subcommand:
+python cli.py gui
+
+# Launch continuous Protocol Hunter in headless mode via CLI:
+python cli.py hunter --hours 2.0 --interval 60 --min-tvl 50000 --deep
+
+# Build standalone Windows executable (dist/DeFiProtocolResearch/DeFiProtocolResearch.exe):
+python packaging/build_exe.py
+```
+
+---
+
+## Test Suite & Continuous Integration
+
 All tests are 100% deterministic, offline by default, and require no live network connections, external tools, or secrets:
 
 ```bash
-# Run the complete test suite (157 tests total):
+# Run the complete test suite (181 tests total):
 python -m unittest discover -s tests -v
 
 # Run individual test modules:
+python -m unittest tests/test_discovery_store.py -v
+python -m unittest tests/test_protocol_hunter.py -v
+python -m unittest tests/test_gui_headless.py -v
 python -m unittest tests/test_cli.py -v
 python -m unittest tests/test_pipeline.py -v
 python -m unittest tests/test_slither_docker.py -v
@@ -380,13 +404,13 @@ python -m unittest tests/test_github_repository_resolver.py -v
 The repository includes automated CI (`.github/workflows/ci.yml`) triggered on every push and pull request to `main`:
 - **Matrix OS:** `ubuntu-latest` and `windows-latest`.
 - **Python Matrix:** `3.10`, `3.11`, and `3.12`.
-- **Packaging:** Validates PEP 517/621 install (`pip install -e .`).
-- **CLI Validation:** Executes `--help` on root CLI and all 7 subcommands (`scan`, `market`, `notrack`, `resolve`, `slither`, `intelligence`, `pipeline`).
-- **Offline Integrity:** Runs the entire test suite completely offline with zero dependency on API keys or external services.
+- **Packaging:** Validates PEP 517/621 install (`pip install -e .[all]`).
+- **CLI Validation:** Executes `--help` on root CLI, `desktop_app.py`, and all 9 subcommands (`scan`, `market`, `notrack`, `resolve`, `slither`, `intelligence`, `pipeline`, `gui`, `hunter`).
+- **Offline Integrity:** Runs the entire test suite completely offline with headless Qt support (`QT_QPA_PLATFORM=offscreen`).
 
 ### Test Suite Summary
-- **Total Tests:** 157
-- **Passing:** 156
+- **Total Tests:** 181
+- **Passing:** 180
 - **Skipped:** 1 (explicit live opt-in test `test_live_api_authentication_and_query_flow`)
 - **Status:** 100% passing offline suite across Ubuntu and Windows.
 

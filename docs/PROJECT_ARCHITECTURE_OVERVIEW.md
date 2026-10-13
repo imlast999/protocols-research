@@ -232,3 +232,33 @@ The automated CI pipeline ([`.github/workflows/ci.yml`](file:///c:/Users/lxstb/D
 - **Python Compatibility:** Tested on Python `3.10`, `3.11`, and `3.12`.
 - **CLI Validation:** Executes all subcommands with `--help` to prevent argument regressions.
 - **Offline Reliability:** Guaranteed deterministic pass without requiring external API keys or Docker Desktop.
+
+---
+
+## 9. Desktop Application Architecture & Protocol Hunter (Phase 8)
+
+### 9.1 Desktop Architecture (PySide6)
+The desktop application is built with PySide6 and organized into modular layers:
+- **`src/defi_research/gui/app.py`**: Configures High-DPI scaling, application metadata, and headless test harnesses.
+- **`src/defi_research/gui/main_window.py`**: Main window featuring:
+  - **Environment Status Header**: Live pills indicating Docker availability, Slither image presence, and CertiK API key status.
+  - **Protocol Explorer & Dashboard Tab**: High-level metrics cards, filter bar (TVL, chains, categories, search text), sortable table, and comprehensive evidence inspector.
+  - **Protocol Hunter Tab**: Continuous discovery controls (duration, interval, TVL threshold, deep investigation toggle), live metrics, and real-time activity log console.
+  - **Reports & Exports Tab**: Report browser, formatted JSON inspection, and discovery database export.
+- **`src/defi_research/gui/workers.py`**: Thread-safe Qt workers (`QThread`) running `ProtocolHunter` and single-protocol pipeline runs in the background to ensure the UI remains responsive at all times.
+
+### 9.2 Protocol Hunter — Continuous Discovery Engine
+`ProtocolHunter` (`src/defi_research/discovery/protocol_hunter.py`) coordinates background discovery without crypto mining or blockchain transactions:
+- **Lifecycle & State Machine:** Transitions between `IDLE`, `RUNNING`, `PAUSED`, `STOPPING`, `COMPLETED`, and `FAILED`.
+- **Filtering & Deduplication:** Reuses `DefiLlamaClient` and filters candidates using exact project criteria. Records are deduplicated by stable protocol IDs (`slug` or `chain:address`).
+- **Resilience:** Handles timeouts and HTTP 429 rate limits without crashing the continuous session.
+
+### 9.3 Versioned JSON Persistence (`DiscoveryStore`)
+- **Versioned Schema:** Schema version `1.0.0` with metadata tracking cycle count, session IDs, and timestamps.
+- **Atomic Writes:** Data is written to `.tmp`, flushed and synced to disk, backed up to `.bak`, and atomically replaced via `os.replace`.
+- **Automatic Recovery:** Recovers from `.bak` if the primary file is corrupted. If both fail, preserves the corrupted file as `corrupted_db_<ts>.json` and initializes safely.
+- **User Data Isolation:** Persistent files are stored in `%APPDATA%\DeFiResearch\discovery` (Windows) or `~/.defi_research/` (Linux/macOS), preventing read-only directory errors in packaged bundles.
+
+### 9.4 Standalone Windows Packaging (PyInstaller)
+- Built via `python packaging/build_exe.py` using `packaging/defi_research.spec`.
+- Generates `dist/DeFiProtocolResearch/DeFiProtocolResearch.exe` as a windowed application.

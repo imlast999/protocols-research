@@ -14,6 +14,22 @@ dependencies = [
     "python-dotenv>=1.0.0",
 ]
 
+[project.optional-dependencies]
+gui = [
+    "PySide6>=6.5.0",
+]
+packaging = [
+    "pyinstaller>=6.0.0",
+]
+all = [
+    "PySide6>=6.5.0",
+    "pyinstaller>=6.0.0",
+]
+
+[project.scripts]
+defi-research = "cli:main"
+defi-research-gui = "defi_research.gui.app:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
