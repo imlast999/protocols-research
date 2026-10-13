@@ -1,0 +1,32 @@
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Slither scan output artifacts
+reports/slither/
+scratch/
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
