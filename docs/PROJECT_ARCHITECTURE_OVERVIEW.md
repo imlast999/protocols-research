@@ -142,9 +142,17 @@ Contract Address -> Etherscan/BscScan/Polygonscan API (action=getsourcecode)
    • Symlinks escaping root are resolved and rejected.
    • Prefix collisions (/workspace_evil vs /workspace) rejected.
    ▼
-[ GATE 4: Subprocess Execution Jail ]
-   • subprocess.Popen(..., shell=False).
-   • Zero execution of npm install, forge build, or repository hooks.
+[ GATE 4: Subprocess Execution Jail (Dual Backend: Native & Docker) ]
+   • Native backend: subprocess.run(..., shell=False) with strictly isolated temp files.
+   • Docker backend: Docker container execution with:
+     - Read-only target volume mount (-v host_dir:/repo:ro)
+     - Isolated temporary output volume (-v host_tmp:/output:rw)
+     - Total network isolation (--network none)
+     - Privilege escalation blocked (--security-opt no-new-privileges)
+     - Capability stripping (--cap-drop ALL)
+     - Resource caps (--memory 2g, --cpus 2.0)
+     - Unprivileged user execution (--user 1000:1000)
+   • Zero execution of npm install, arbitrary build scripts, or untrusted repository hooks.
    • Strict timeout enforcement (default 120s).
    ▼
 [ GATE 5: Provider Decoupling & Fault Isolation ]

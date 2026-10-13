@@ -215,12 +215,48 @@ python cli.py resolve --url "https://github.com/aave/aave-v3-core.git"
 
 ---
 
-### 3. Slither Static Analysis
+### 3. Slither Static Analysis (Dual Backend: Native & Docker)
 
-```bash
-# Execute Slither in an isolated workspace with a verified commit:
-python cli.py slither -t ./workspace/aave-v3-core --slug aave-v3 --commit e5d4c3b2
-```
+Slither static analysis can execute either natively on the host (if `slither` and `solc` are installed) or inside a secure, reproducible Docker container (recommended on Windows).
+
+#### Backend Modes (`--backend`):
+- `auto` (Default): Checks if native `slither` is available in PATH. If not found, automatically falls back to Docker.
+- `docker`: Enforces execution inside the project-maintained Docker container.
+- `native`: Enforces execution using the host machine's native `slither` installation.
+
+#### Docker Environment Setup (Windows / macOS / Linux)
+
+1. **Install and start Docker Desktop**: Ensure Docker Desktop is installed and the engine is running.
+2. **Build the reproducible image**:
+   ```powershell
+   docker build -t defi-slither:0.10.2 .
+   ```
+   The image is pinned to **Python 3.11-slim**, **Slither Analyzer 0.10.4**, and **solc-select 1.0.4**, with **solc 0.8.20** and **0.8.24** pre-installed.
+
+3. **Execute Slither via Docker**:
+   ```powershell
+   # Run against a verified local repository:
+   python cli.py slither -t ./tests/fixtures/vulnerable_contract --backend docker --commit c0ffee12
+
+   # Run via the end-to-end pipeline:
+   python cli.py pipeline --slug aave-v3 -t ./workspace/aave-v3-core --backend docker
+   ```
+
+#### Docker Security Controls Enforced:
+- **Read-Only Mount**: Verified repository is mounted read-only (`-v host_dir:/repo:ro`). The container cannot alter source files.
+- **Isolated Output**: Findings are written to a dedicated host temporary volume (`-v host_tmp:/output:rw`).
+- **Network Isolation**: Strict `--network none` flag blocks all outbound and inbound network traffic.
+- **Privilege Stripping**: `--security-opt no-new-privileges` and `--cap-drop ALL`.
+- **Resource Caps**: `--memory 2g` and `--cpus 2.0` prevent container Denial-of-Service.
+- **Unprivileged User**: Container executes as unprivileged UID `1000:1000`.
+
+#### Analysis Status Interpretations:
+- `COMPLETED`: Slither ran successfully, generated valid JSON AST findings, and all findings were parsed.
+- `TOOL_UNAVAILABLE`: Neither host `slither` nor a running Docker daemon / image was accessible.
+- `PREREQUISITE_MISSING`: The contract requires an uninstalled Solidity compiler version (outside `0.8.20` / `0.8.24`) or build configuration files (`foundry.toml`, etc.) are absent.
+- `TIMED_OUT`: Container or process exceeded the configured timeout threshold (default: 120s).
+- `ANALYSIS_FAILED`: Fatal execution error or container crash.
+- `NOT_ELIGIBLE`: Target failed security gates (repository confidence was not `RESOLVED_CONFIDENT`, source verification failed, or path traversal was detected).
 
 ---
 

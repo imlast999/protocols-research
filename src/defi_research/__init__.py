@@ -57,6 +57,9 @@ from defi_research.pipeline import (
 from defi_research.slither_runner import (
     AnalysisStatus,
     SlitherAnalysisResult,
+    build_docker_run_args,
+    check_docker_availability,
+    check_docker_image_availability,
     check_slither_availability,
     is_directory_in_workspace,
     run_slither_analysis,

@@ -260,10 +260,13 @@ def cmd_slither(args, logger: logging.Logger):
         timeout_seconds=args.timeout,
         output_dir=args.output_dir,
         commit_hash=args.commit,
+        backend=getattr(args, "backend", "auto"),
+        docker_image=getattr(args, "docker_image", None),
     )
 
     print(f"\n[+] RESULTADO DEL ANÁLISIS SLITHER:")
     print(f"    -> Estado del análisis:      {res.analysis_status.value}")
+    print(f"    -> Backend de ejecución:     {res.execution_backend}")
     print(f"    -> Protocolo:                 {res.protocol_name}")
     print(f"    -> Commit Git analizado:      {res.commit_hash or '(No determinado)'}")
     print(f"    -> Verificación de fuentes:   {res.source_verification_status}")
@@ -306,11 +309,14 @@ def cmd_slither(args, logger: logging.Logger):
         print(f"    {res.reason}")
 
     elif res.analysis_status == AnalysisStatus.TOOL_UNAVAILABLE:
-        print(f"\n[!] INSTRUCCIONES DE INSTALACIÓN DE SLITHER:")
-        print(f"    Para habilitar el escáner estático Slither:")
-        print(f"    1. Asegúrate de tener Python y pip instalados.")
-        print(f"    2. Ejecuta: pip install slither-analyzer")
-        print(f"    3. Instala solc-select: pip install solc-select && solc-select install 0.8.20")
+        print(f"\n[!] INSTRUCCIONES DE HABILITACIÓN DE SLITHER:")
+        print(f"    1. Modo Docker (Recomendado en Windows):")
+        print(f"       - Inicia Docker Desktop.")
+        print(f"       - Construye la imagen: docker build -t defi-slither:0.10.2 .")
+        print(f"       - Ejecuta con: python cli.py slither -t <ruta> --backend docker")
+        print(f"    2. Modo Nativo:")
+        print(f"       - Instala Slither: pip install slither-analyzer")
+        print(f"       - Instala solc-select: pip install solc-select && solc-select install 0.8.20")
 
     elif res.analysis_status == AnalysisStatus.PREREQUISITE_MISSING:
         print(f"\n[!] PRERREQUISITOS FALTANTES:")
@@ -456,6 +462,8 @@ def cmd_pipeline(args, logger):
             commit_hash=commit_hash,
             output_dir=output_dir,
             live_provider=live_check,
+            slither_backend=getattr(args, "backend", "auto"),
+            docker_image=getattr(args, "docker_image", None),
         )
 
         if as_json:
@@ -511,6 +519,8 @@ def cmd_pipeline(args, logger):
             category=category,
             output_dir=output_dir,
             live_provider=live_check,
+            slither_backend=getattr(args, "backend", "auto"),
+            docker_image=getattr(args, "docker_image", None),
         )
 
         if as_json:
@@ -755,6 +765,8 @@ def main():
     p_slither.add_argument("--commit", default=None, help="Hash de commit Git específico a auditar")
     p_slither.add_argument("--timeout", type=int, default=120, help="Tiempo límite de ejecución en segundos (default: 120)")
     p_slither.add_argument("--output-dir", default="./reports/slither", help="Directorio para almacenar el reporte JSON")
+    p_slither.add_argument("--backend", choices=["auto", "docker", "native"], default=os.getenv("SLITHER_BACKEND", "auto"), help="Backend de ejecución de Slither: auto (default), docker o native")
+    p_slither.add_argument("--docker-image", default=os.getenv("SLITHER_DOCKER_IMAGE", "defi-slither:0.10.2"), help="Nombre de la imagen Docker para Slither (default: defi-slither:0.10.2)")
 
     # Subcomando: intelligence
     p_intel = subparsers.add_parser("intelligence", parents=[common_parser], help="Consultar inteligencia de seguridad y reputación (CertiK Skynet)")
@@ -774,6 +786,8 @@ def main():
     p_pipeline.add_argument("-t", "--target-dir", default=None, help="Directorio local para verificación de fuentes y Slither")
     p_pipeline.add_argument("--commit", default=None, help="Commit Git específico a auditar")
     p_pipeline.add_argument("--output-dir", default="./reports/pipeline", help="Directorio para almacenar reportes JSON estructurados")
+    p_pipeline.add_argument("--backend", choices=["auto", "docker", "native"], default=os.getenv("SLITHER_BACKEND", "auto"), help="Backend de ejecución de Slither: auto (default), docker o native")
+    p_pipeline.add_argument("--docker-image", default=os.getenv("SLITHER_DOCKER_IMAGE", "defi-slither:0.10.2"), help="Nombre de la imagen Docker para Slither (default: defi-slither:0.10.2)")
     p_pipeline.add_argument("--live-check", action="store_true", help="Opt-in para consultas a APIs en vivo autenticadas")
     p_pipeline.add_argument("--json", action="store_true", help="Imprimir salida en formato JSON estructurado")
 

@@ -119,6 +119,7 @@ class SlitherAnalysisResult:
     started_at: int
     duration_seconds: float
     exit_code: Optional[int]
+    execution_backend: str = "native"
     workflow_type: str = "REPOSITORY_CHECKOUT"
     findings: List[Dict[str, Any]] = field(default_factory=list)
     findings_summary: Dict[str, int] = field(default_factory=dict)
@@ -131,6 +132,7 @@ class SlitherAnalysisResult:
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data["analysis_status"] = self.analysis_status.value
+        data["execution_backend"] = self.execution_backend
         return data
 
     def to_json(self, indent: int = 2) -> str:
@@ -183,30 +185,29 @@ def is_directory_in_workspace(target_dir: str, allowed_workspaces: Optional[List
     return False
 
 
-def check_slither_availability(
-    custom_executable: Optional[str] = None,
+def check_docker_availability(
+    docker_executable: Optional[str] = None,
     timeout_seconds: int = 5,
-) -> Tuple[bool, Optional[str], Optional[str]]:
+) -> Tuple[bool, bool, Optional[str]]:
     """
-    Checks whether Slither executable is available and queries its version.
-    Returns (is_available, version_string, error_message).
-    Executes subprocess without invoking a shell.
+    Checks whether Docker CLI is installed and the Docker daemon is accessible.
+    Returns (cli_available, daemon_available, diagnostic_message).
+    Executes subprocess strictly without shell (shell=False).
     """
-    exe_name = custom_executable or "slither"
-    which_path = shutil.which(exe_name)
-
-    if not which_path and not (custom_executable and os.path.exists(custom_executable)):
+    docker_bin = docker_executable or "docker"
+    which_path = shutil.which(docker_bin)
+    if not which_path and not (docker_executable and os.path.exists(docker_executable)):
         return (
             False,
-            None,
-            f"Slither executable '{exe_name}' not found in PATH. "
-            "Please install Slither ('pip install slither-analyzer') and ensure it is available in PATH.",
+            False,
+            f"Docker CLI executable '{docker_bin}' not found in PATH. "
+            "Please install Docker Desktop and ensure 'docker' is available in your PATH.",
         )
 
-    cmd_target = which_path or exe_name
+    cmd_target = which_path or docker_bin
     try:
         proc = subprocess.run(
-            [cmd_target, "--version"],
+            [cmd_target, "info"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -214,18 +215,237 @@ def check_slither_availability(
             timeout=timeout_seconds,
         )
         if proc.returncode == 0:
-            version_str = proc.stdout.strip()
-            return True, version_str, None
+            return True, True, None
         else:
+            err_snip = sanitize_output_text(proc.stderr.strip()[:200]) or "Docker daemon returned non-zero status"
+            return (
+                True,
+                False,
+                f"Docker CLI is installed, but Docker daemon is offline or inaccessible: {err_snip}",
+            )
+    except subprocess.TimeoutExpired:
+        return True, False, f"Timeout after {timeout_seconds}s querying Docker daemon."
+    except Exception as e:
+        return True, False, f"Error communicating with Docker daemon: {e}"
+
+
+def check_docker_image_availability(
+    image_name: str,
+    docker_executable: Optional[str] = None,
+    timeout_seconds: int = 5,
+) -> Tuple[bool, Optional[str]]:
+    """
+    Checks whether a specific Docker image is available locally.
+    Returns (is_available, diagnostic_message).
+    Executes subprocess strictly without shell (shell=False).
+    """
+    if not image_name:
+        return False, "Docker image name was not specified."
+
+    docker_bin = shutil.which(docker_executable or "docker") or docker_executable or "docker"
+    try:
+        proc = subprocess.run(
+            [docker_bin, "image", "inspect", image_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            shell=False,
+            timeout=timeout_seconds,
+        )
+        if proc.returncode == 0:
+            return True, None
+        return (
+            False,
+            f"Docker image '{image_name}' is not found locally. "
+            f"Please build it using: docker build -t {image_name} .",
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"Timeout inspecting Docker image '{image_name}'."
+    except Exception as e:
+        return False, f"Error inspecting Docker image '{image_name}': {e}"
+
+
+def build_docker_run_args(
+    target_dir: str,
+    host_output_dir: str,
+    image_name: str,
+    container_output_path: str = "/output/slither_out.json",
+    docker_executable: Optional[str] = None,
+    extra_slither_args: Optional[List[str]] = None,
+) -> List[str]:
+    """
+    Constructs the secure argument list for invoking Slither within a Docker container.
+
+    Security constraints enforced:
+    - --rm: automatic container cleanup on exit
+    - --network none: total network isolation (no network access permitted)
+    - --security-opt no-new-privileges: prevents privilege escalation
+    - --cap-drop ALL: drops all Linux capabilities
+    - --memory 2g: caps container RAM usage to prevent DoS
+    - --cpus 2.0: caps CPU usage
+    - --user 1000:1000: runs as unprivileged user
+    - Target repository mounted strictly read-only (:ro)
+    - Output directory mounted in dedicated temporary directory (:rw)
+    - Working directory set to /repo
+    - Never uses shell=True
+    """
+    docker_bin = shutil.which(docker_executable or "docker") or docker_executable or "docker"
+    real_target = os.path.realpath(os.path.abspath(target_dir))
+    real_out = os.path.realpath(os.path.abspath(host_output_dir))
+
+    cmd = [
+        docker_bin,
+        "run",
+        "--rm",
+        "--network", "none",
+        "--security-opt", "no-new-privileges",
+        "--cap-drop", "ALL",
+        "--memory", "2g",
+        "--cpus", "2.0",
+        "--user", "1000:1000",
+        "-v", f"{real_target}:/repo:ro",
+        "-v", f"{real_out}:/output:rw",
+        "-w", "/repo",
+        image_name,
+        "slither",
+        ".",
+        "--json",
+        container_output_path,
+    ]
+
+    if extra_slither_args:
+        cmd.extend(extra_slither_args)
+
+    return cmd
+
+
+def check_slither_availability(
+    custom_executable: Optional[str] = None,
+    timeout_seconds: int = 5,
+    backend: Optional[str] = None,
+    docker_image: Optional[str] = None,
+    docker_executable: Optional[str] = None,
+) -> Tuple[bool, Optional[str], Optional[str]]:
+    """
+    Checks whether Slither executable or Docker environment is available.
+    Supports backend='auto' (fallback), backend='native', or backend='docker'.
+    Returns (is_available, version_string, error_message).
+    Executes subprocess without invoking a shell.
+    """
+    eff_backend = (backend or os.getenv("SLITHER_BACKEND", "auto")).lower()
+    eff_image = docker_image or os.getenv("SLITHER_DOCKER_IMAGE", "defi-slither:0.10.2")
+
+    def _check_native() -> Tuple[bool, Optional[str], Optional[str]]:
+        exe_name = custom_executable or "slither"
+        which_path = shutil.which(exe_name)
+
+        if not which_path and not (custom_executable and os.path.exists(custom_executable)):
             return (
                 False,
                 None,
-                f"Slither invocation failed with code {proc.returncode}: {proc.stderr.strip()}",
+                f"Slither executable '{exe_name}' not found in PATH. "
+                "Please install Slither ('pip install slither-analyzer') and ensure it is available in PATH.",
             )
-    except subprocess.TimeoutExpired:
-        return False, None, "Timeout checking Slither version."
-    except Exception as e:
-        return False, None, f"Error checking Slither executable: {e}"
+
+        cmd_target = which_path or exe_name
+        try:
+            proc = subprocess.run(
+                [cmd_target, "--version"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                shell=False,
+                timeout=timeout_seconds,
+            )
+            if proc.returncode == 0:
+                version_str = proc.stdout.strip()
+                return True, version_str, None
+            else:
+                return (
+                    False,
+                    None,
+                    f"Slither invocation failed with code {proc.returncode}: {proc.stderr.strip()}",
+                )
+        except subprocess.TimeoutExpired:
+            return False, None, "Timeout checking Slither version."
+        except Exception as e:
+            return False, None, f"Error checking Slither executable: {e}"
+
+    if eff_backend == "native":
+        return _check_native()
+
+    if eff_backend == "docker":
+        cli_ok, daemon_ok, doc_err = check_docker_availability(docker_executable, timeout_seconds)
+        if not cli_ok:
+            return False, None, doc_err
+        if not daemon_ok:
+            return False, None, doc_err
+        img_ok, img_err = check_docker_image_availability(eff_image, docker_executable, timeout_seconds)
+        if not img_ok:
+            return False, None, img_err
+        docker_bin = shutil.which(docker_executable or "docker") or docker_executable or "docker"
+        try:
+            proc = subprocess.run(
+                [docker_bin, "run", "--rm", "--network", "none", eff_image, "slither", "--version"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                shell=False,
+                timeout=timeout_seconds,
+            )
+            if proc.returncode == 0:
+                return True, f"docker:{proc.stdout.strip()}", None
+            return True, f"docker:{eff_image}", None
+        except Exception:
+            return True, f"docker:{eff_image}", None
+
+    # eff_backend == "auto":
+    # 1. Native first
+    nat_ok, nat_ver, nat_err = _check_native()
+    if nat_ok:
+        return True, nat_ver, None
+
+    # 2. Docker fallback
+    cli_ok, daemon_ok, doc_err = check_docker_availability(docker_executable, timeout_seconds)
+    if not cli_ok:
+        return (
+            False,
+            None,
+            f"Slither executable 'slither' not found in PATH. "
+            "Please install Slither ('pip install slither-analyzer') or install Docker Desktop. "
+            f"Docker CLI check: {doc_err}",
+        )
+    if not daemon_ok:
+        return (
+            False,
+            None,
+            f"Slither not installed on host, and Docker daemon is unavailable: {doc_err}. "
+            "Please start Docker Desktop or install Slither ('pip install slither-analyzer').",
+        )
+    img_ok, img_err = check_docker_image_availability(eff_image, docker_executable, timeout_seconds)
+    if not img_ok:
+        return (
+            False,
+            None,
+            f"Slither not installed on host, and Docker image '{eff_image}' is missing: {img_err}. "
+            f"Build it using: docker build -t {eff_image} . or install Slither ('pip install slither-analyzer').",
+        )
+
+    docker_bin = shutil.which(docker_executable or "docker") or docker_executable or "docker"
+    try:
+        proc = subprocess.run(
+            [docker_bin, "run", "--rm", "--network", "none", eff_image, "slither", "--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            shell=False,
+            timeout=timeout_seconds,
+        )
+        if proc.returncode == 0:
+            return True, f"docker:{proc.stdout.strip()}", None
+        return True, f"docker:{eff_image}", None
+    except Exception:
+        return True, f"docker:{eff_image}", None
 
 
 def parse_slither_json(raw_json_str: str) -> Tuple[List[Dict[str, Any]], Dict[str, int], Optional[str]]:
@@ -340,7 +560,7 @@ def parse_slither_json(raw_json_str: str) -> Tuple[List[Dict[str, Any]], Dict[st
 
 
 def run_slither_analysis(
-    target_dir: str,
+    target_dir: str = "",
     protocol_record: Optional[Dict[str, Any]] = None,
     allowed_workspaces: Optional[List[str]] = None,
     timeout_seconds: int = 120,
@@ -349,6 +569,10 @@ def run_slither_analysis(
     verification_record: Optional[SourceVerificationRecord] = None,
     commit_hash: Optional[str] = None,
     default_branch: Optional[str] = None,
+    backend: Optional[str] = None,
+    docker_image: Optional[str] = None,
+    docker_executable: Optional[str] = None,
+    **kwargs,
 ) -> SlitherAnalysisResult:
     """
     Executes a controlled, gated Slither static analysis on a local repository directory.
@@ -358,12 +582,25 @@ def run_slither_analysis(
     2. Repository resolution confidence is RESOLVED_CONFIDENT (if protocol_record provided).
     3. Source verification status is SOURCE_VERIFIED.
     4. Deterministic Git commit hash is recorded.
-    5. Slither executable is installed and available.
+    5. Slither executable or Docker container environment is available.
 
-    Executes Slither as a subprocess strictly without invoking a shell.
+    Supports execution backends:
+    - 'native': executes local Slither installation
+    - 'docker': executes reproducible Slither container with --network none and :ro mount
+    - 'auto': uses native Slither if available, falls back to Docker container
+
+    Executes subprocess strictly without invoking a shell.
     """
     start_time = time.time()
     started_at = int(start_time)
+
+    # Backward compatibility parameter aliases
+    if not target_dir and "repo_dir" in kwargs:
+        target_dir = kwargs["repo_dir"]
+    if protocol_record is None and "protocol" in kwargs:
+        protocol_record = kwargs["protocol"]
+    if verification_record is None and "source_verification" in kwargs:
+        verification_record = kwargs["source_verification"]
 
     proto_name = (protocol_record.get("protocol_name") or protocol_record.get("name") or "Unknown Protocol") if protocol_record else "Local Repository"
     proto_slug = (protocol_record.get("defillama_slug") or protocol_record.get("slug")) if protocol_record else None
@@ -376,19 +613,22 @@ def run_slither_analysis(
         ver_status: str = "VERIFICATION_NOT_RUN",
         exit_code: Optional[int] = None,
         wf_type: str = "REPOSITORY_CHECKOUT",
+        execution_backend: str = "native",
     ) -> SlitherAnalysisResult:
         duration = time.time() - start_time
+        eff_c = commit_hash
         return SlitherAnalysisResult(
             protocol_name=proto_name,
             defillama_slug=proto_slug,
             repository_url=repo_url,
-            commit_hash=commit_hash,
+            commit_hash=eff_c,
             source_verification_status=ver_status,
             slither_version=None,
             analysis_status=status,
             started_at=started_at,
             duration_seconds=round(duration, 3),
             exit_code=exit_code,
+            execution_backend=execution_backend,
             workflow_type=wf_type,
             findings=[],
             findings_summary={"High": 0, "Medium": 0, "Low": 0, "Informational": 0, "Optimization": 0, "total": 0},
@@ -503,113 +743,263 @@ def run_slither_analysis(
             wf_type=wf_type,
         )
 
-    # Gate 7: Tool Availability Check
-    tool_ok, slither_version, tool_err = check_slither_availability(slither_executable)
-    if not tool_ok:
-        return _create_rejection(
-            AnalysisStatus.TOOL_UNAVAILABLE,
-            tool_err or "Slither static analyzer is unavailable.",
-            ver_status=ver.status.value,
-            wf_type=wf_type,
+    # Gate 7: Tool Availability & Execution Backend Selection
+    eff_backend = (backend or os.getenv("SLITHER_BACKEND", "auto")).lower()
+    eff_image = docker_image or os.getenv("SLITHER_DOCKER_IMAGE", "defi-slither:0.10.2")
+
+    selected_backend = "native"
+    selected_version: Optional[str] = None
+
+    if eff_backend == "docker":
+        cli_ok, daemon_ok, doc_err = check_docker_availability(docker_executable)
+        if not cli_ok:
+            return _create_rejection(
+                AnalysisStatus.TOOL_UNAVAILABLE,
+                f"Docker execution backend selected but Docker CLI is unavailable: {doc_err}",
+                ver_status=ver.status.value,
+                wf_type=wf_type,
+                execution_backend="docker",
+            )
+        if not daemon_ok:
+            return _create_rejection(
+                AnalysisStatus.TOOL_UNAVAILABLE,
+                f"Docker execution backend selected but Docker daemon is offline: {doc_err}",
+                ver_status=ver.status.value,
+                wf_type=wf_type,
+                execution_backend="docker",
+            )
+        img_ok, img_err = check_docker_image_availability(eff_image, docker_executable)
+        if not img_ok:
+            return _create_rejection(
+                AnalysisStatus.TOOL_UNAVAILABLE,
+                f"Docker execution backend selected but Docker image is unavailable: {img_err}",
+                ver_status=ver.status.value,
+                wf_type=wf_type,
+                execution_backend="docker",
+            )
+        selected_backend = "docker"
+        _, selected_version, _ = check_slither_availability(
+            backend="docker",
+            docker_image=eff_image,
+            docker_executable=docker_executable,
         )
 
-    # Stage C Execution: Run Slither Subprocess with Isolated Temporary Output File
-    slither_bin = shutil.which(slither_executable or "slither") or slither_executable or "slither"
-    
-    # Create secure isolated temp file outside the analyzed repository to avoid polluting target directory
-    tmp_fd, output_json_path = tempfile.mkstemp(prefix="slither_tmp_", suffix=".json")
-    os.close(tmp_fd)
+    elif eff_backend == "native":
+        tool_ok, slither_version, tool_err = check_slither_availability(
+            custom_executable=slither_executable,
+            backend="native",
+        )
+        if not tool_ok:
+            return _create_rejection(
+                AnalysisStatus.TOOL_UNAVAILABLE,
+                tool_err or "Slither static analyzer is unavailable.",
+                ver_status=ver.status.value,
+                wf_type=wf_type,
+                execution_backend="native",
+            )
+        selected_backend = "native"
+        selected_version = slither_version
 
-    cmd = [
-        slither_bin,
-        ".",
-        "--json",
-        output_json_path,
-    ]
+    else:  # eff_backend == "auto"
+        nat_ok, nat_ver, nat_err = check_slither_availability(
+            custom_executable=slither_executable,
+            backend="native",
+        )
+        if nat_ok:
+            selected_backend = "native"
+            selected_version = nat_ver
+        else:
+            cli_ok, daemon_ok, doc_err = check_docker_availability(docker_executable)
+            if not cli_ok:
+                return _create_rejection(
+                    AnalysisStatus.TOOL_UNAVAILABLE,
+                    f"Slither static analyzer is unavailable. Host: {nat_err}. Docker CLI: {doc_err}",
+                    ver_status=ver.status.value,
+                    wf_type=wf_type,
+                    execution_backend="native",
+                )
+            if not daemon_ok:
+                return _create_rejection(
+                    AnalysisStatus.TOOL_UNAVAILABLE,
+                    f"Slither static analyzer is unavailable. Host: {nat_err}. Docker daemon is offline: {doc_err}",
+                    ver_status=ver.status.value,
+                    wf_type=wf_type,
+                    execution_backend="docker",
+                )
+            img_ok, img_err = check_docker_image_availability(eff_image, docker_executable)
+            if not img_ok:
+                return _create_rejection(
+                    AnalysisStatus.TOOL_UNAVAILABLE,
+                    f"Slither static analyzer is unavailable. Host: {nat_err}. Docker image '{eff_image}' is missing: {img_err}",
+                    ver_status=ver.status.value,
+                    wf_type=wf_type,
+                    execution_backend="docker",
+                )
+            selected_backend = "docker"
+            _, selected_version, _ = check_slither_availability(
+                backend="docker",
+                docker_image=eff_image,
+                docker_executable=docker_executable,
+            )
 
+    # Stage C Execution: Run Slither via selected backend
     stdout_str = ""
     stderr_str = ""
     exit_code = None
+    raw_json_str = ""
 
-    try:
-        proc = subprocess.run(
-            cmd,
-            cwd=target_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            shell=False,
-            timeout=timeout_seconds,
+    if selected_backend == "docker":
+        host_output_dir = tempfile.mkdtemp(prefix="slither_docker_out_")
+        host_json_path = os.path.join(host_output_dir, "slither_out.json")
+        cmd = build_docker_run_args(
+            target_dir=real_target,
+            host_output_dir=host_output_dir,
+            image_name=eff_image,
+            container_output_path="/output/slither_out.json",
+            docker_executable=docker_executable,
         )
-        stdout_str = proc.stdout
-        stderr_str = proc.stderr
-        exit_code = proc.returncode
+        try:
+            proc = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                shell=False,
+                timeout=timeout_seconds,
+            )
+            stdout_str = proc.stdout
+            stderr_str = proc.stderr
+            exit_code = proc.returncode
 
-    except subprocess.TimeoutExpired as e:
-        duration = time.time() - start_time
-        return SlitherAnalysisResult(
-            protocol_name=proto_name,
-            defillama_slug=proto_slug,
-            repository_url=repo_url,
-            commit_hash=effective_commit,
-            source_verification_status=ver.status.value,
-            slither_version=slither_version,
-            analysis_status=AnalysisStatus.TIMED_OUT,
-            started_at=started_at,
-            duration_seconds=round(duration, 3),
-            exit_code=None,
-            workflow_type=wf_type,
-            findings=[],
-            findings_summary={"High": 0, "Medium": 0, "Low": 0, "Informational": 0, "Optimization": 0, "total": 0},
-            stderr_summary=sanitize_output_text(((e.stderr or "")[:1000]) if hasattr(e, "stderr") and e.stderr else "Subprocess exceeded timeout threshold"),
-            stdout_summary=sanitize_output_text(((e.stdout or "")[:1000]) if hasattr(e, "stdout") and e.stdout else ""),
-            reason=f"Slither static analysis timed out after {timeout_seconds} seconds.",
-        )
+            if os.path.exists(host_json_path):
+                with open(host_json_path, "r", encoding="utf-8") as f:
+                    raw_json_str = f.read()
 
-    except Exception as e:
-        duration = time.time() - start_time
-        return SlitherAnalysisResult(
-            protocol_name=proto_name,
-            defillama_slug=proto_slug,
-            repository_url=repo_url,
-            commit_hash=effective_commit,
-            source_verification_status=ver.status.value,
-            slither_version=slither_version,
-            analysis_status=AnalysisStatus.ANALYSIS_FAILED,
-            started_at=started_at,
-            duration_seconds=round(duration, 3),
-            exit_code=None,
-            workflow_type=wf_type,
-            findings=[],
-            findings_summary={"High": 0, "Medium": 0, "Low": 0, "Informational": 0, "Optimization": 0, "total": 0},
-            stderr_summary=sanitize_output_text(str(e)),
-            reason=f"Failed to execute Slither subprocess: {e}",
-        )
+        except subprocess.TimeoutExpired as e:
+            duration = time.time() - start_time
+            return SlitherAnalysisResult(
+                protocol_name=proto_name,
+                defillama_slug=proto_slug,
+                repository_url=repo_url,
+                commit_hash=effective_commit,
+                source_verification_status=ver.status.value,
+                slither_version=selected_version,
+                analysis_status=AnalysisStatus.TIMED_OUT,
+                started_at=started_at,
+                duration_seconds=round(duration, 3),
+                exit_code=None,
+                execution_backend="docker",
+                workflow_type=wf_type,
+                findings=[],
+                findings_summary={"High": 0, "Medium": 0, "Low": 0, "Informational": 0, "Optimization": 0, "total": 0},
+                stderr_summary=sanitize_output_text(((e.stderr or "")[:1000]) if hasattr(e, "stderr") and e.stderr else "Docker container exceeded timeout threshold"),
+                stdout_summary=sanitize_output_text(((e.stdout or "")[:1000]) if hasattr(e, "stdout") and e.stdout else ""),
+                reason=f"Slither static analysis in Docker timed out after {timeout_seconds} seconds.",
+            )
+        except Exception as e:
+            duration = time.time() - start_time
+            return SlitherAnalysisResult(
+                protocol_name=proto_name,
+                defillama_slug=proto_slug,
+                repository_url=repo_url,
+                commit_hash=effective_commit,
+                source_verification_status=ver.status.value,
+                slither_version=selected_version,
+                analysis_status=AnalysisStatus.ANALYSIS_FAILED,
+                started_at=started_at,
+                duration_seconds=round(duration, 3),
+                exit_code=None,
+                execution_backend="docker",
+                workflow_type=wf_type,
+                findings=[],
+                findings_summary={"High": 0, "Medium": 0, "Low": 0, "Informational": 0, "Optimization": 0, "total": 0},
+                stderr_summary=sanitize_output_text(str(e)),
+                reason=f"Failed to execute Slither in Docker container: {e}",
+            )
+        finally:
+            if os.path.exists(host_output_dir):
+                shutil.rmtree(host_output_dir, ignore_errors=True)
 
-    finally:
-        # Guarantee removal of temporary file
-        if output_json_path and os.path.exists(output_json_path):
-            try:
-                # Read JSON before deleting if not already read
-                pass
-            except OSError:
-                pass
+    else:
+        # Native execution
+        slither_bin = shutil.which(slither_executable or "slither") or slither_executable or "slither"
+        tmp_fd, output_json_path = tempfile.mkstemp(prefix="slither_tmp_", suffix=".json")
+        os.close(tmp_fd)
+
+        cmd = [
+            slither_bin,
+            ".",
+            "--json",
+            output_json_path,
+        ]
+
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=real_target,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                shell=False,
+                timeout=timeout_seconds,
+            )
+            stdout_str = proc.stdout
+            stderr_str = proc.stderr
+            exit_code = proc.returncode
+
+            if os.path.exists(output_json_path):
+                with open(output_json_path, "r", encoding="utf-8") as f:
+                    raw_json_str = f.read()
+
+        except subprocess.TimeoutExpired as e:
+            duration = time.time() - start_time
+            return SlitherAnalysisResult(
+                protocol_name=proto_name,
+                defillama_slug=proto_slug,
+                repository_url=repo_url,
+                commit_hash=effective_commit,
+                source_verification_status=ver.status.value,
+                slither_version=selected_version,
+                analysis_status=AnalysisStatus.TIMED_OUT,
+                started_at=started_at,
+                duration_seconds=round(duration, 3),
+                exit_code=None,
+                execution_backend="native",
+                workflow_type=wf_type,
+                findings=[],
+                findings_summary={"High": 0, "Medium": 0, "Low": 0, "Informational": 0, "Optimization": 0, "total": 0},
+                stderr_summary=sanitize_output_text(((e.stderr or "")[:1000]) if hasattr(e, "stderr") and e.stderr else "Subprocess exceeded timeout threshold"),
+                stdout_summary=sanitize_output_text(((e.stdout or "")[:1000]) if hasattr(e, "stdout") and e.stdout else ""),
+                reason=f"Slither static analysis timed out after {timeout_seconds} seconds.",
+            )
+        except Exception as e:
+            duration = time.time() - start_time
+            return SlitherAnalysisResult(
+                protocol_name=proto_name,
+                defillama_slug=proto_slug,
+                repository_url=repo_url,
+                commit_hash=effective_commit,
+                source_verification_status=ver.status.value,
+                slither_version=selected_version,
+                analysis_status=AnalysisStatus.ANALYSIS_FAILED,
+                started_at=started_at,
+                duration_seconds=round(duration, 3),
+                exit_code=None,
+                execution_backend="native",
+                workflow_type=wf_type,
+                findings=[],
+                findings_summary={"High": 0, "Medium": 0, "Low": 0, "Informational": 0, "Optimization": 0, "total": 0},
+                stderr_summary=sanitize_output_text(str(e)),
+                reason=f"Failed to execute Slither subprocess: {e}",
+            )
+        finally:
+            if output_json_path and os.path.exists(output_json_path):
+                try:
+                    os.remove(output_json_path)
+                except OSError:
+                    pass
 
     duration = time.time() - start_time
-
-    # Inspect Slither Output JSON from temp file
-    raw_json_str = ""
-    if output_json_path and os.path.exists(output_json_path):
-        try:
-            with open(output_json_path, "r", encoding="utf-8") as f:
-                raw_json_str = f.read()
-        except Exception as e:
-            logger.warning(f"Failed to read Slither JSON artifact: {e}")
-        finally:
-            try:
-                os.remove(output_json_path)
-            except OSError:
-                pass
 
     # Fallback to stdout if JSON was printed to stdout
     if not raw_json_str and stdout_str and stdout_str.strip().startswith("{"):
@@ -623,7 +1013,7 @@ def run_slither_analysis(
     if raw_json_str:
         findings, summary, json_err = parse_slither_json(raw_json_str)
 
-    # Check for compile / dependency errors
+    # Check for compile / dependency / compiler version errors
     compile_error_signatures = [
         "source file requires different compiler version",
         "file not found",
@@ -633,6 +1023,10 @@ def run_slither_analysis(
         "solc was not able to compile",
         "cannot find",
         "import not found",
+        "no solc version matching",
+        "solc-select install",
+        "unsupported compiler",
+        "compiler version",
     ]
     has_compile_error = any(sig in stderr_str.lower() for sig in compile_error_signatures) or (json_err and any(sig in json_err.lower() for sig in compile_error_signatures))
 
@@ -650,18 +1044,19 @@ def run_slither_analysis(
             repository_url=repo_url,
             commit_hash=effective_commit,
             source_verification_status=ver.status.value,
-            slither_version=slither_version,
+            slither_version=selected_version,
             analysis_status=AnalysisStatus.PREREQUISITE_MISSING,
             started_at=started_at,
             duration_seconds=round(duration, 3),
             exit_code=exit_code,
+            execution_backend=selected_backend,
             workflow_type=wf_type,
             findings=[],
             findings_summary={"High": 0, "Medium": 0, "Low": 0, "Informational": 0, "Optimization": 0, "total": 0},
             stderr_summary=sanitize_output_text(stderr_str.strip()[:2000]),
             stdout_summary=sanitize_output_text(stdout_str.strip()[:1000]),
             limitations=active_limitations,
-            reason="Slither compilation failed: external dependencies or required compiler version are missing. "
+            reason="Slither compilation failed: external dependencies or required compiler version are missing or incompatible with the environment. "
                    "Arbitrary build scripts were not executed to preserve system safety.",
         )
 
@@ -676,11 +1071,12 @@ def run_slither_analysis(
             repository_url=repo_url,
             commit_hash=effective_commit,
             source_verification_status=ver.status.value,
-            slither_version=slither_version,
+            slither_version=selected_version,
             analysis_status=AnalysisStatus.PREREQUISITE_MISSING if has_compile_error else AnalysisStatus.ANALYSIS_FAILED,
             started_at=started_at,
             duration_seconds=round(duration, 3),
             exit_code=exit_code,
+            execution_backend=selected_backend,
             workflow_type=wf_type,
             findings=[],
             findings_summary={"High": 0, "Medium": 0, "Low": 0, "Informational": 0, "Optimization": 0, "total": 0},
@@ -698,11 +1094,12 @@ def run_slither_analysis(
             repository_url=repo_url,
             commit_hash=effective_commit,
             source_verification_status=ver.status.value,
-            slither_version=slither_version,
+            slither_version=selected_version,
             analysis_status=AnalysisStatus.ANALYSIS_FAILED,
             started_at=started_at,
             duration_seconds=round(duration, 3),
             exit_code=exit_code,
+            execution_backend=selected_backend,
             workflow_type=wf_type,
             findings=[],
             findings_summary={"High": 0, "Medium": 0, "Low": 0, "Informational": 0, "Optimization": 0, "total": 0},
@@ -735,11 +1132,12 @@ def run_slither_analysis(
         repository_url=repo_url,
         commit_hash=effective_commit,
         source_verification_status=ver.status.value,
-        slither_version=slither_version,
+        slither_version=selected_version,
         analysis_status=AnalysisStatus.COMPLETED,
         started_at=started_at,
         duration_seconds=round(duration, 3),
         exit_code=exit_code,
+        execution_backend=selected_backend,
         workflow_type=wf_type,
         findings=findings,
         findings_summary=summary or {"High": 0, "Medium": 0, "Low": 0, "Informational": 0, "Optimization": 0, "total": 0},
@@ -747,7 +1145,7 @@ def run_slither_analysis(
         stdout_summary=sanitize_output_text(stdout_str.strip()[:1000]) if stdout_str else None,
         raw_artifact_path=artifact_saved_path,
         limitations=active_limitations,
-        reason=f"Slither analysis completed successfully: {len(findings)} finding(s) detected across {ver.build_framework or 'Solidity'} codebase.",
+        reason=f"Slither analysis completed successfully via {selected_backend}: {len(findings)} finding(s) detected across {ver.build_framework or 'Solidity'} codebase.",
     )
 
     if artifact_saved_path:

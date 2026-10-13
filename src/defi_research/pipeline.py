@@ -179,6 +179,7 @@ class ProtocolPipelineReport:
     slither_findings_count: Optional[int] = None
     slither_findings_summary: Dict[str, int] = field(default_factory=dict)
     slither_diagnostics: Optional[str] = None
+    slither_execution_backend: Optional[str] = None
 
     # Stage 5: Security intelligence details
     security_intelligence_status: Optional[str] = None
@@ -216,6 +217,7 @@ class ProtocolPipelineReport:
             },
             "static_analysis": {
                 "status": self.static_analysis_status,
+                "execution_backend": self.slither_execution_backend,
                 "slither_version": self.slither_version,
                 "findings_count": self.slither_findings_count,
                 "findings_summary": self.slither_findings_summary,
@@ -308,6 +310,8 @@ def run_protocol_pipeline(
     live_provider: bool = False,
     client: Optional[DefiLlamaClient] = None,
     allowed_workspaces: Optional[List[str]] = None,
+    slither_backend: Optional[str] = None,
+    docker_image: Optional[str] = None,
 ) -> ProtocolPipelineReport:
     """
     Execute the end-to-end 7-stage pipeline for a single DeFi protocol.
@@ -573,7 +577,16 @@ def run_protocol_pipeline(
             )
         else:
             # Check tool availability before running
-            avail_ok, avail_diag = check_slither_availability()
+            res_avail = check_slither_availability(backend=slither_backend, docker_image=docker_image)
+            if isinstance(res_avail, tuple) and len(res_avail) == 3:
+                avail_ok = res_avail[0]
+                avail_diag = res_avail[2] or res_avail[1] or "Slither is available"
+            elif isinstance(res_avail, tuple) and len(res_avail) == 2:
+                avail_ok, avail_diag = res_avail
+            else:
+                avail_ok = bool(res_avail)
+                avail_diag = "Available" if avail_ok else "Unavailable"
+
             if not avail_ok:
                 stage_outcomes["static_analysis"] = StageOutcome(
                     status=StageStatus.UNAVAILABLE,
@@ -590,10 +603,13 @@ def run_protocol_pipeline(
                         source_verification=verification_record,
                         commit_hash=commit_hash or verification_record.analyzed_commit,
                         allowed_workspaces=allowed_workspaces,
+                        backend=slither_backend,
+                        docker_image=docker_image,
                     )
 
                     sl_status = getattr(slither_result, "analysis_status", getattr(slither_result, "status", AnalysisStatus.ANALYSIS_FAILED))
                     sl_diag = getattr(slither_result, "reason", getattr(slither_result, "diagnostics", getattr(slither_result, "stderr_summary", "")))
+                    sl_backend = getattr(slither_result, "execution_backend", "native")
 
                     if sl_status == AnalysisStatus.COMPLETED:
                         findings_summary: Dict[str, int] = {}
@@ -603,12 +619,13 @@ def run_protocol_pipeline(
 
                         stage_outcomes["static_analysis"] = StageOutcome(
                             status=StageStatus.SUCCESS,
-                            message=f"Analysis completed with {len(slither_result.findings)} findings",
+                            message=f"Analysis completed with {len(slither_result.findings)} findings via {sl_backend}",
                             started_at=s4_iso_start,
                             completed_at=datetime.now(timezone.utc).isoformat(),
                             duration_seconds=slither_result.duration_seconds,
                             details={
                                 "status": sl_status.value,
+                                "execution_backend": sl_backend,
                                 "slither_version": slither_result.slither_version,
                                 "findings_count": len(slither_result.findings),
                                 "findings_summary": findings_summary,
@@ -622,6 +639,7 @@ def run_protocol_pipeline(
                             started_at=s4_iso_start,
                             completed_at=datetime.now(timezone.utc).isoformat(),
                             duration_seconds=slither_result.duration_seconds,
+                            details={"execution_backend": sl_backend},
                         )
                     elif sl_status == AnalysisStatus.NOT_ELIGIBLE:
                         stage_outcomes["static_analysis"] = StageOutcome(
@@ -630,6 +648,7 @@ def run_protocol_pipeline(
                             started_at=s4_iso_start,
                             completed_at=datetime.now(timezone.utc).isoformat(),
                             duration_seconds=slither_result.duration_seconds,
+                            details={"execution_backend": sl_backend},
                         )
                     else:
                         stage_outcomes["static_analysis"] = StageOutcome(
@@ -638,7 +657,7 @@ def run_protocol_pipeline(
                             started_at=s4_iso_start,
                             completed_at=datetime.now(timezone.utc).isoformat(),
                             duration_seconds=slither_result.duration_seconds,
-                            details={"exit_code": slither_result.exit_code},
+                            details={"exit_code": slither_result.exit_code, "execution_backend": sl_backend},
                         )
                 except Exception as exc:
                     stage_outcomes["static_analysis"] = StageOutcome(
@@ -771,6 +790,7 @@ def run_protocol_pipeline(
         slither_findings_count=findings_count,
         slither_findings_summary=findings_summary,
         slither_diagnostics=slither_diag,
+        slither_execution_backend=getattr(slither_result, "execution_backend", None) if slither_result else None,
         security_intelligence_status=sec_status_str,
         security_score=sec_score,
         security_score_grade=sec_grade,
@@ -801,6 +821,8 @@ def run_pipeline(
     live_provider: bool = False,
     client: Optional[DefiLlamaClient] = None,
     allowed_workspaces: Optional[List[str]] = None,
+    slither_backend: Optional[str] = None,
+    docker_image: Optional[str] = None,
 ) -> PipelineRunSummary:
     """
     Run pipeline on multiple protocols discovered via DefiLlama.
@@ -842,6 +864,8 @@ def run_pipeline(
             live_provider=live_provider,
             client=defillama_client,
             allowed_workspaces=allowed_workspaces,
+            slither_backend=slither_backend,
+            docker_image=docker_image,
         )
         reports.append(rep)
         if rep.overall_status == PipelineOverallStatus.COMPLETED:
